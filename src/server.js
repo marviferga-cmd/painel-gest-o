@@ -1,11 +1,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { timingSafeEqual } from "node:crypto";
 import express from "express";
 import helmet from "helmet";
 import compression from "compression";
 import { prisma } from "./db.js";
 import { api } from "./routes.js";
+import { carregarUsuario, garantirAdmin } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -40,19 +40,10 @@ app.get("/healthz", async (req, res) => {
   }
 });
 
-/* Autenticação básica opcional: defina APP_USER e APP_PASSWORD para ativar. */
-const { APP_USER, APP_PASSWORD } = process.env;
-if (APP_USER && APP_PASSWORD) {
-  const expected = Buffer.from(`${APP_USER}:${APP_PASSWORD}`);
-  app.use((req, res, next) => {
-    const header = req.headers.authorization || "";
-    const given = Buffer.from(header.startsWith("Basic ") ? Buffer.from(header.slice(6), "base64").toString() : "");
-    if (given.length === expected.length && timingSafeEqual(given, expected)) return next();
-    res.set("WWW-Authenticate", 'Basic realm="Painel de Gestao", charset="UTF-8"').status(401).send("Autenticação necessária");
-  });
-} else if (isProd) {
-  console.warn("⚠ APP_USER/APP_PASSWORD não definidos: o painel está público.");
-}
+/* Login: o painel só abre com sessão; sem ela, vai para a tela de login.
+   A API se protege sozinha (routes.js). css/js/login.html ficam públicos. */
+app.get(["/", "/index.html"], carregarUsuario, (req, res, next) => (req.user ? next() : res.redirect("/login.html")));
+app.get("/login.html", carregarUsuario, (req, res, next) => (req.user ? res.redirect("/") : next()));
 
 app.use("/api", express.json({ limit: "100kb" }), api);
 
@@ -62,6 +53,12 @@ app.use(express.static(path.join(__dirname, "..", "public"), {
     if (file.endsWith(".html")) res.setHeader("Cache-Control", "no-cache");
   },
 }));
+
+try {
+  await garantirAdmin();
+} catch (err) {
+  console.error("Não foi possível criar o administrador inicial:", err.message);
+}
 
 const server = app.listen(PORT, () => {
   console.log(`Painel de Gestão rodando em http://localhost:${PORT}`);

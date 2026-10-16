@@ -334,3 +334,44 @@ model Evento {
   @@index([inicio])
   @@map("eventos")
 }
+
+// ---------------------------------------------------------------
+// ACESSO (login, aprovação e permissões por tela)
+// ---------------------------------------------------------------
+
+model Usuario {
+  id           Int       @id @default(autoincrement())
+  nome         String
+  email        String    @unique // sempre minúsculo
+  senhaHash    String    @map("senha_hash") // scrypt: salt:hash (hex)
+  papel        String    @default("usuario") // admin | usuario
+  status       String    @default("pendente") // pendente | ativo | bloqueado
+  permissoes   String[]  @default([]) // chaves das telas restritas liberadas
+  ultimoAcesso DateTime? @map("ultimo_acesso")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  sessoes Sessao[]
+
+  @@map("usuarios")
+}
+
+model Sessao {
+  id        String   @id // SHA-256 do token do cookie (o token em si não é guardado)
+  usuarioId Int      @map("usuario_id")
+  expiraEm  DateTime @map("expira_em")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@index([expiraEm])
+  @@map("sessoes")
+}
+
+// Telas que só usuários com permissão explícita (ou admins) podem abrir.
+model TelaRestrita {
+  chave String @id // chave do módulo (src/modules.js)
+
+  @@map("telas_restritas")
+}

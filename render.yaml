@@ -25,9 +25,9 @@ services:
         fromDatabase:
           name: painel-gestao-db
           property: connectionString
-      - key: APP_USER
-        sync: false        # o Render pede o valor na criação
-      - key: APP_PASSWORD
-        sync: false
+      - key: ADMIN_EMAIL
+        sync: false        # o Render pede o valor na criação (login do administrador)
+      - key: ADMIN_PASSWORD
+        sync: false        # mínimo 8 caracteres; troque depois pelo menu do usuário
       - key: ALLOW_DEMO_RESET
         value: "false"

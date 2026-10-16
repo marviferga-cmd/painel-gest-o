@@ -1,11 +1,20 @@
 import { Router } from "express";
 import { prisma } from "./db.js";
-import { findModule, publicMeta } from "./modules.js";
+import { findModule, MODULES, publicMeta } from "./modules.js";
 import { createRow, deleteRow, listRows, LOOKUPS, updateRow } from "./crud.js";
 import { slaStatus, tempoRestante, todayDate, ValidationError } from "./lib/format.js";
 import { seed } from "../prisma/seed.js";
+import {
+  authApi, carregarUsuario, exigirAdmin, exigirLogin, exigirTela,
+  podeVer, telasRestritas, usuarioPublico, usuariosApi,
+} from "./auth.js";
 
 export const api = Router();
+
+/* login/cadastro ficam abertos; todo o resto exige sessão */
+api.use("/auth", authApi);
+api.use(carregarUsuario, exigirLogin);
+api.use("/usuarios", usuariosApi);
 
 const allowReset = () => process.env.ALLOW_DEMO_RESET === "true";
 
@@ -26,37 +35,59 @@ function tableModule(req, { write = false } = {}) {
   return mod;
 }
 
+/* qual tela (módulo) cada rota de dados alimenta, para checar permissão */
+const telaDoQuadro = (board) => MODULES.find((m) => m.type === "kanban" && m.board === board)?.key ?? null;
+const telaDoParam = (req) => req.params.key;
+async function telaDoCard(req) {
+  const card = await prisma.kanbanCard.findUnique({ where: { id: idParam(req) }, include: { coluna: { select: { quadro: true } } } });
+  return card ? telaDoQuadro(card.coluna.quadro) : null;
+}
+
 /* ---------------- metadados ---------------- */
-api.get("/meta", (req, res) => {
-  res.json({ ...publicMeta(), allowReset: allowReset() });
+api.get("/meta", async (req, res) => {
+  const restritas = await telasRestritas();
+  const meta = publicMeta();
+  meta.groups = meta.groups
+    .map((g) => ({ ...g, items: g.items.filter((i) => podeVer(req.user, i.key, restritas)) }))
+    .filter((g) => g.items.length);
+  if (req.user.papel === "admin") {
+    meta.groups.push({
+      key: "admin", label: "Administração",
+      items: [{ key: "usuarios", label: "Usuários e acesso", icon: "usercheck", accent: "indigo", type: "users",
+        desc: "Aprovar cadastros, bloquear contas e definir quem pode ver cada tela restrita." }],
+    });
+    meta.pendentes = await prisma.usuario.count({ where: { status: "pendente" } });
+  }
+  res.json({ ...meta, user: usuarioPublico(req.user), allowReset: allowReset() && req.user.papel === "admin" });
 });
 
-api.get("/lookups/:name", async (req, res) => {
+// a lista de faturas mostra valores: só para quem vê as telas financeiras
+api.get("/lookups/:name", exigirTela((req) => (req.params.name === "faturas" ? ["faturamento", "notas-fiscais"] : null)), async (req, res) => {
   const fn = LOOKUPS[req.params.name];
   if (!fn) return res.status(404).json({ error: "Lista desconhecida" });
   res.json(await fn(prisma));
 });
 
 /* ---------------- tabelas genéricas ---------------- */
-api.get("/modules/:key", async (req, res) => {
+api.get("/modules/:key", exigirTela(telaDoParam), async (req, res) => {
   res.json(await listRows(prisma, tableModule(req)));
 });
 
-api.post("/modules/:key", async (req, res) => {
+api.post("/modules/:key", exigirTela(telaDoParam), async (req, res) => {
   res.status(201).json(await createRow(prisma, tableModule(req, { write: true }), req.body));
 });
 
-api.put("/modules/:key/:id", async (req, res) => {
+api.put("/modules/:key/:id", exigirTela(telaDoParam), async (req, res) => {
   res.json(await updateRow(prisma, tableModule(req, { write: true }), idParam(req), req.body));
 });
 
-api.delete("/modules/:key/:id", async (req, res) => {
+api.delete("/modules/:key/:id", exigirTela(telaDoParam), async (req, res) => {
   await deleteRow(prisma, tableModule(req, { write: true }), idParam(req));
   res.status(204).end();
 });
 
 /* ---------------- kanban ---------------- */
-api.get("/kanban/:board", async (req, res) => {
+api.get("/kanban/:board", exigirTela((req) => telaDoQuadro(req.params.board)), async (req, res) => {
   const colunas = await prisma.kanbanColuna.findMany({
     where: { quadro: req.params.board },
     orderBy: { ordem: "asc" },
@@ -73,7 +104,7 @@ async function nextOrder(colunaId) {
   return (agg._max.ordem ?? -1) + 1;
 }
 
-api.post("/kanban/:board/cards", async (req, res) => {
+api.post("/kanban/:board/cards", exigirTela((req) => telaDoQuadro(req.params.board)), async (req, res) => {
   const titulo = String(req.body?.titulo ?? "").trim();
   const colunaId = Number(req.body?.colunaId);
   if (!titulo) throw new ValidationError("Título é obrigatório");
@@ -85,7 +116,7 @@ api.post("/kanban/:board/cards", async (req, res) => {
   res.status(201).json(card);
 });
 
-api.patch("/kanban/cards/:id", async (req, res) => {
+api.patch("/kanban/cards/:id", exigirTela(telaDoCard), async (req, res) => {
   const id = idParam(req);
   const data = {};
   if (req.body?.colunaId !== undefined) {
@@ -98,13 +129,13 @@ api.patch("/kanban/cards/:id", async (req, res) => {
   res.json(await prisma.kanbanCard.update({ where: { id }, data }));
 });
 
-api.delete("/kanban/cards/:id", async (req, res) => {
+api.delete("/kanban/cards/:id", exigirTela(telaDoCard), async (req, res) => {
   await prisma.kanbanCard.delete({ where: { id: idParam(req) } });
   res.status(204).end();
 });
 
 /* ---------------- eventos ---------------- */
-api.get("/eventos", async (req, res) => {
+api.get("/eventos", exigirTela("eventos-semana"), async (req, res) => {
   const de = new Date(req.query.de);
   const ate = new Date(req.query.ate);
   if (Number.isNaN(de.getTime()) || Number.isNaN(ate.getTime())) throw new ValidationError("Parâmetros de/ate inválidos");
@@ -112,7 +143,7 @@ api.get("/eventos", async (req, res) => {
   res.json(eventos);
 });
 
-api.post("/eventos", async (req, res) => {
+api.post("/eventos", exigirTela("eventos-semana"), async (req, res) => {
   const titulo = String(req.body?.titulo ?? "").trim();
   const inicio = new Date(req.body?.inicio);
   if (!titulo) throw new ValidationError("Descrição é obrigatória");
@@ -121,13 +152,13 @@ api.post("/eventos", async (req, res) => {
   res.status(201).json(await prisma.evento.create({ data: { titulo: titulo.slice(0, 300), inicio, modulo } }));
 });
 
-api.delete("/eventos/:id", async (req, res) => {
+api.delete("/eventos/:id", exigirTela("eventos-semana"), async (req, res) => {
   await prisma.evento.delete({ where: { id: idParam(req) } });
   res.status(204).end();
 });
 
 /* ---------------- resumos calculados ---------------- */
-api.get("/resumo/os", async (req, res) => {
+api.get("/resumo/os", exigirTela("indicadores"), async (req, res) => {
   const [ordens, faturas, ativos] = await Promise.all([
     prisma.ordemServico.findMany({ include: { cliente: { select: { nome: true } }, servico: { select: { nome: true } }, responsavel: { select: { nome: true } } }, orderBy: { prazo: "asc" } }),
     prisma.fatura.findMany({ select: { valor: true, status: true, vencimento: true } }),
@@ -157,7 +188,7 @@ api.get("/resumo/os", async (req, res) => {
   });
 });
 
-api.get("/resumo/clientes", async (req, res) => {
+api.get("/resumo/clientes", exigirTela("relatorios"), async (req, res) => {
   const clientes = await prisma.cliente.findMany({
     orderBy: { nome: "asc" },
     include: {
@@ -181,7 +212,7 @@ api.get("/resumo/clientes", async (req, res) => {
   }));
 });
 
-api.get("/resumo/sla", async (req, res) => {
+api.get("/resumo/sla", exigirTela("dashboards-sla"), async (req, res) => {
   const desde = new Date(Date.now() - 30 * 86400e3);
   const [abertos, concluidos] = await Promise.all([
     prisma.chamado.findMany({ where: { concluidoEm: null }, include: { cliente: { select: { nome: true } }, responsavel: { select: { nome: true } } }, orderBy: { prazoEm: "asc" } }),
@@ -204,14 +235,14 @@ api.get("/resumo/sla", async (req, res) => {
   });
 });
 
-api.get("/resumo/alertas", async (req, res) => {
+api.get("/resumo/alertas", exigirTela(["chamados-risco", "dashboards-sla"]), async (req, res) => {
   const limite = new Date(Date.now() + 24 * 3600e3);
   const emRisco = await prisma.chamado.count({ where: { concluidoEm: null, prazoEm: { lt: limite } } });
   res.json({ chamadosEmRisco: emRisco });
 });
 
 /* ---------------- administração ---------------- */
-api.post("/admin/reset", async (req, res) => {
+api.post("/admin/reset", exigirAdmin, async (req, res) => {
   if (!allowReset()) return res.status(403).json({ error: "Restauração desativada neste ambiente (ALLOW_DEMO_RESET)" });
   await seed(prisma);
   res.json({ ok: true });

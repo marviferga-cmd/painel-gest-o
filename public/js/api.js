@@ -7,6 +7,7 @@ const API = {
       body: body !== undefined ? JSON.stringify(body) : undefined,
       credentials: "same-origin",
     });
+    if (res.status === 401){ location.replace("/login.html"); throw new Error("Sessão expirada"); }
     if (res.status === 204) return null;
     let data = null;
     try { data = await res.json(); } catch { /* resposta sem JSON */ }

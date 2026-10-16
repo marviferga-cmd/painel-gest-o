@@ -26,6 +26,7 @@ const App = {
       }
     }
     document.getElementById("resetData").hidden = !this.meta.allowReset;
+    this.renderUser();
     this.buildNav();
     const initial = decodeURIComponent(location.hash.slice(1)) || "home";
     await this.navigate(this.findItem(initial) ? initial : "home", { replace: true });
@@ -63,6 +64,27 @@ const App = {
       btn.addEventListener("click", () => this.navigate(btn.dataset.key));
     });
     this.refreshNavCounts();
+    this.setPendingBadge(this.meta.pendentes ?? 0);
+  },
+
+  /* cadastros aguardando aprovação (só admins recebem esse número) */
+  setPendingBadge(n){
+    const el = document.querySelector('[data-count-for="usuarios"]');
+    if (!el) return;
+    el.hidden = n === 0;
+    el.textContent = n;
+    el.closest(".nav-item").classList.toggle("risk", n > 0);
+  },
+
+  renderUser(){
+    const u = this.meta.user;
+    if (!u) return;
+    const partes = u.nome.trim().split(/\s+/);
+    document.getElementById("userAvatar").textContent = partes.slice(0, 2).map(p => p[0]).join("").toUpperCase() || "?";
+    document.getElementById("userName").textContent = partes[0];
+    document.getElementById("userPopName").textContent = u.nome;
+    document.getElementById("userPopEmail").textContent = u.email;
+    document.getElementById("userMenu").hidden = false;
   },
 
   /* quantos chamados estão atrasados ou vencem em < 24h */
@@ -146,6 +168,7 @@ const App = {
         const el = form.elements.namedItem(f.key);
         const raw = el.value.trim();
         switch (f.type){
+          case "password": values[f.key] = el.value; break;
           case "number": values[f.key] = raw === "" ? null : Number(raw); break;
           case "ref": values[f.key] = raw === "" ? null : Number(raw); break;
           case "bool": values[f.key] = raw === "true"; break;
@@ -212,6 +235,8 @@ const App = {
         return wrap(`<input id="${id}" name="${esc(f.key)}" type="month" value="${esc(current ?? "")}" ${req}>`);
       case "time":
         return wrap(`<input id="${id}" name="${esc(f.key)}" type="time" value="${esc(current ?? "")}" ${req}>`);
+      case "password":
+        return wrap(`<input id="${id}" name="${esc(f.key)}" type="password" autocomplete="new-password" ${req}>`);
       case "hours":
         return wrap(`<input id="${id}" name="${esc(f.key)}" type="text" value="${esc(current ?? "")}" placeholder="ex: +3h20, -1h30, 45min" ${req}>`);
       default:
@@ -255,6 +280,35 @@ const App = {
       let saved = null;
       try { saved = localStorage.getItem("theme"); } catch {}
       if (!saved) this.setTheme(e.matches ? "light" : "dark");
+    });
+
+    const chip = document.getElementById("userChip");
+    const pop = document.getElementById("userPop");
+    const setPop = (open) => { pop.hidden = !open; chip.setAttribute("aria-expanded", String(open)); };
+    chip.addEventListener("click", (e) => { e.stopPropagation(); setPop(pop.hidden); });
+    document.addEventListener("click", (e) => { if (!pop.hidden && !pop.contains(e.target)) setPop(false); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") setPop(false); });
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      try { await API.post("/auth/logout"); } catch {}
+      location.replace("/login.html");
+    });
+
+    document.getElementById("changePassword").addEventListener("click", () => {
+      setPop(false);
+      this.openFormModal({
+        title: "Alterar senha",
+        fields: [
+          { key: "atual", label: "Senha atual", type: "password", required: true },
+          { key: "nova", label: "Nova senha", type: "password", required: true, hint: "Mínimo de 8 caracteres." },
+          { key: "confirma", label: "Confirmar nova senha", type: "password", required: true },
+        ],
+        onSubmit: async (v) => {
+          if (v.nova !== v.confirma) throw new Error("As senhas não conferem");
+          await API.post("/auth/senha", { atual: v.atual, nova: v.nova });
+          toast("Senha alterada");
+        },
+      });
     });
 
     document.getElementById("resetData").addEventListener("click", async () => {

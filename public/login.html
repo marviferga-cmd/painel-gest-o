@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entrar · Painel de Gestão</title>
+<meta name="theme-color" content="#090E1A">
+<script src="js/theme-init.js"></script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235B7CFA'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='13' font-weight='700' text-anchor='middle' fill='%230B1220'%3EGP%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-body">
+
+<main class="auth-wrap">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="brand-mark">GP</span>
+      <div class="brand-text">
+        <strong>Painel de Gestão</strong>
+        <span>operação &amp; serviços</span>
+      </div>
+    </div>
+
+    <div class="auth-tabs" role="tablist">
+      <button type="button" role="tab" class="auth-tab active" data-tab="login" aria-selected="true">Entrar</button>
+      <button type="button" role="tab" class="auth-tab" data-tab="cadastro" aria-selected="false">Criar conta</button>
+    </div>
+
+    <form id="loginForm" class="auth-form" novalidate>
+      <div class="field">
+        <label for="loginEmail">E-mail</label>
+        <input id="loginEmail" name="email" type="email" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="loginSenha">Senha</label>
+        <input id="loginSenha" name="senha" type="password" autocomplete="current-password" required>
+      </div>
+      <p class="form-error" hidden></p>
+      <button type="submit" class="btn btn-primary auth-submit">Entrar</button>
+    </form>
+
+    <form id="cadastroForm" class="auth-form" novalidate hidden>
+      <div class="field">
+        <label for="cadNome">Nome completo</label>
+        <input id="cadNome" name="nome" type="text" autocomplete="name" maxlength="120" required>
+      </div>
+      <div class="field">
+        <label for="cadEmail">E-mail</label>
+        <input id="cadEmail" name="email" type="email" autocomplete="email" required>
+      </div>
+      <div class="field">
+        <label for="cadSenha">Senha</label>
+        <input id="cadSenha" name="senha" type="password" autocomplete="new-password" minlength="8" required>
+        <small class="field-hint">Mínimo de 8 caracteres.</small>
+      </div>
+      <div class="field">
+        <label for="cadSenha2">Confirmar senha</label>
+        <input id="cadSenha2" name="senha2" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <p class="form-error" hidden></p>
+      <button type="submit" class="btn btn-primary auth-submit">Criar conta</button>
+      <p class="auth-note">Depois do cadastro, o administrador precisa aprovar seu acesso.</p>
+    </form>
+
+    <div id="cadastroOk" class="auth-done" hidden>
+      <h2>Cadastro enviado</h2>
+      <p>Seu pedido de acesso foi registrado. Assim que o administrador aprovar, você poderá entrar com seu e-mail e senha.</p>
+      <button type="button" class="btn" id="voltarLogin">Voltar para o login</button>
+    </div>
+  </div>
+</main>
+
+<script src="js/login.js"></script>
+</body>
+</html>

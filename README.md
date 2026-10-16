@@ -17,7 +17,7 @@ Painel único de **Gestão de Pessoas**, **Ordens de Serviço** e **Monitorament
 | "Ativos", "OS ativas", "Acompanhamento por responsável" digitados | **Calculados** a partir dos dados (sem duplicação) |
 | Eventos presos a "segunda/terça…" (repetiam toda semana) | Eventos com **data e hora reais**; navegar entre semanas mostra eventos diferentes |
 | Texto do banco inserido direto no HTML (risco de XSS) | Todo conteúdo é escapado; CSP com Helmet |
-| URL do Apps Script aberta para "Qualquer pessoa" | Login opcional (HTTP Basic) via variáveis de ambiente |
+| URL do Apps Script aberta para "Qualquer pessoa" | **Login com cadastro e aprovação**, permissões por tela |
 | Status livre (qualquer texto) | Listas de status por módulo, validadas no servidor |
 
 ## Estrutura
@@ -25,12 +25,13 @@ Painel único de **Gestão de Pessoas**, **Ordens de Serviço** e **Monitorament
 ```
 painel-gestao/
 ├── prisma/
-│   ├── schema.prisma               → modelo de dados (17 tabelas)
+│   ├── schema.prisma               → modelo de dados (20 tabelas)
 │   ├── migrations/                 → SQL versionado (aplicado com migrate deploy)
 │   └── seed.js                     → dados de exemplo
 ├── src/
 │   ├── server.js                   → Express, segurança, login, arquivos estáticos
 │   ├── routes.js                   → rotas /api
+│   ├── auth.js                     → login, cadastro, sessões, permissões, admin de usuários
 │   ├── modules.js                  → definição dos módulos (colunas, validações, cálculos)
 │   ├── crud.js                     → CRUD genérico + listas para os selects
 │   ├── db.js                       → Prisma Client (driver pg, sem binário nativo)
@@ -54,6 +55,8 @@ npm run db:seed                 # opcional: dados de exemplo
 npm run dev                     # http://localhost:3000
 ```
 
+Na primeira vez, abra o painel e use **Criar conta**: em desenvolvimento, o primeiro cadastro de um banco vazio já vira administrador. (Ou defina `ADMIN_EMAIL`/`ADMIN_PASSWORD` no `.env`.)
+
 Sem Postgres instalado? Suba tudo com Docker:
 
 ```bash
@@ -67,7 +70,7 @@ docker compose exec app npm run db:seed   # opcional
 
 1. Suba esta pasta para um repositório no GitHub.
 2. No Render: **New → Blueprint** e escolha o repositório. O `render.yaml` cria o banco PostgreSQL e o serviço web.
-3. Informe `APP_USER` e `APP_PASSWORD` quando o Render pedir (é o login do painel).
+3. Informe `ADMIN_EMAIL` e `ADMIN_PASSWORD` quando o Render pedir: é a conta do administrador, criada na primeira inicialização.
 4. Ao final do deploy, as migrações já terão rodado (`npm run start:prod`). Para dados de exemplo, abra o **Shell** do serviço e rode `npm run db:seed`.
 
 ### Opção 2 — Docker em qualquer servidor/VM
@@ -76,7 +79,7 @@ docker compose exec app npm run db:seed   # opcional
 docker build -t painel-gestao .
 docker run -d -p 3000:3000 \
   -e DATABASE_URL="postgresql://usuario:senha@host:5432/painel" \
-  -e APP_USER=admin -e APP_PASSWORD=troque-esta-senha \
+  -e ADMIN_EMAIL=voce@empresa.com -e ADMIN_PASSWORD=troque-esta-senha \
   painel-gestao
 ```
 
@@ -93,7 +96,7 @@ Qualquer plataforma Node funciona: build `npm ci`, start `npm run start:prod`, v
 | `DATABASE_URL` | Conexão PostgreSQL (obrigatória) |
 | `PORT` | Porta HTTP (padrão 3000; as plataformas definem sozinhas) |
 | `APP_TZ` | Fuso para "hoje" em vencimentos e prazos (padrão `America/Sao_Paulo`) |
-| `APP_USER` / `APP_PASSWORD` | Ativam o login do painel. **Defina em produção.** |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NOME` | Conta do administrador inicial, criada se não existir. **Obrigatório em produção.** A senha só vale na criação. |
 | `ALLOW_DEMO_RESET` | `true` mostra o botão "Restaurar dados de exemplo" (apaga o banco). Use `false` em produção. |
 
 ## API
@@ -107,7 +110,16 @@ Qualquer plataforma Node funciona: build `npm ci`, start `npm run start:prod`, v
 | GET / POST / PATCH / DELETE | `/api/kanban/...` | Quadro Kanban |
 | GET / POST / DELETE | `/api/eventos` | Agenda (`?de=ISO&ate=ISO`) |
 | GET | `/api/resumo/os` · `/clientes` · `/sla` · `/alertas` | Indicadores calculados |
+| POST | `/api/auth/login` · `/cadastro` · `/logout` · `/senha` | Sessão e conta do usuário |
+| GET / PATCH / POST / DELETE | `/api/usuarios[/:id]` · PUT `/api/usuarios/telas-restritas` | Administração de usuários (só admin) |
 | GET | `/healthz` | Verifica servidor e banco |
+
+## Login e permissões
+
+- Qualquer pessoa pode **criar conta** na tela de login, mas só entra depois que um administrador **aprovar** (menu *Administração → Usuários e acesso*, que mostra um contador de pendentes).
+- Na mesma tela o admin marca quais **telas são restritas**. Telas restritas só aparecem (e só respondem na API) para administradores e para quem tiver a tela liberada. As demais ficam visíveis para todo usuário aprovado. Por padrão vêm restritas: *Cargos e Salários*, *Faturamento* e *Notas Fiscais*.
+- O admin também pode bloquear contas, promover outros administradores, redefinir senhas e excluir contas. Cada usuário troca a própria senha pelo menu com seu nome, no topo.
+- Senhas guardadas com scrypt; sessão em cookie `HttpOnly` de 7 dias; limite de tentativas de login por IP.
 
 ## Regras de SLA
 
