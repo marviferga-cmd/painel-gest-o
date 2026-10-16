@@ -1,0 +1,21 @@
+{
+  "groups": [
+    { "key": "pessoas", "label": "Gestão de Pessoas", "items": [
+      { "key": "colaboradores", "label": "Colaboradores", "icon": "users", "accent": "indigo" },
+      { "key": "kanban-pessoas", "label": "Kanban", "icon": "kanban", "accent": "indigo" }
+    ] },
+    { "key": "os", "label": "Gestão de Ordens de Serviço", "items": [
+      { "key": "clientes", "label": "Clientes", "icon": "people", "accent": "slate" },
+      { "key": "controle-os", "label": "Controle de OS", "icon": "clipboard", "accent": "blue" },
+      { "key": "indicadores", "label": "Indicadores", "icon": "gauge", "accent": "amber" }
+    ] },
+    { "key": "sla", "label": "Monitoramento de SLA", "items": [
+      { "key": "chamados-risco", "label": "Chamados", "icon": "alert", "accent": "red" },
+      { "key": "dashboards-sla", "label": "Dashboards", "icon": "gauge", "accent": "indigo" }
+    ] },
+    { "key": "geral", "label": "Geral", "items": [
+      { "key": "eventos-semana", "label": "Eventos da Semana", "icon": "calendar", "accent": "amber" }
+    ] }
+  ],
+  "allowReset": false
+}

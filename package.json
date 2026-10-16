@@ -1,0 +1,35 @@
+{
+  "name": "painel-gestao",
+  "version": "2.0.0",
+  "description": "Painel de Gestão — Pessoas, Ordens de Serviço e SLA (Express + Prisma + PostgreSQL)",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
+    "start": "node src/server.js",
+    "start:prod": "prisma migrate deploy && node src/server.js",
+    "build": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "node --env-file-if-exists=.env prisma/seed.js",
+    "db:studio": "prisma studio",
+    "check": "node --check src/server.js && node --check src/routes.js && node --check src/crud.js && node --check src/modules.js",
+    "postinstall": "prisma generate"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "6.19.3",
+    "@prisma/client": "6.19.3",
+    "compression": "^1.8.1",
+    "express": "^5.2.1",
+    "helmet": "^8.1.0",
+    "pg": "^8.23.1",
+    "prisma": "6.19.3"
+  }
+}

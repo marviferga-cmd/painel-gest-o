@@ -1,0 +1,33 @@
+# Blueprint do Render (https://render.com) — cria o banco PostgreSQL e o serviço web.
+# No painel do Render: New > Blueprint > selecione o repositório.
+databases:
+  - name: painel-gestao-db
+    plan: free
+    databaseName: painel
+    user: painel
+
+services:
+  - type: web
+    name: painel-gestao
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run start:prod   # aplica migrações e sobe o servidor
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: APP_TZ
+        value: America/Sao_Paulo
+      - key: DATABASE_URL
+        fromDatabase:
+          name: painel-gestao-db
+          property: connectionString
+      - key: APP_USER
+        sync: false        # o Render pede o valor na criação
+      - key: APP_PASSWORD
+        sync: false
+      - key: ALLOW_DEMO_RESET
+        value: "false"

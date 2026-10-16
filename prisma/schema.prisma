@@ -1,0 +1,336 @@
+// =============================================================
+// PAINEL DE GESTÃO — esquema do banco (PostgreSQL)
+//
+// Princípios:
+// - Pessoas, clientes, cargos e serviços são CADASTROS únicos, referenciados
+//   por chave estrangeira (nada de nome digitado repetido em cada tabela).
+// - Datas são datas de verdade (DATE / TIMESTAMP em UTC), dinheiro é DECIMAL,
+//   horas do banco de horas são minutos inteiros.
+// - Tudo que pode ser calculado NÃO é armazenado: dias de férias, saldo atual,
+//   colaboradores ativos por cargo, OS ativas, risco de SLA, tempo restante.
+// =============================================================
+
+generator client {
+  provider   = "prisma-client-js"
+  // Cliente sem engine Rust: consultas vão pelo driver "pg" (src/db.js).
+  // Imagem de deploy menor e sem binário nativo para baixar em runtime.
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------
+// CADASTROS
+// ---------------------------------------------------------------
+
+model Cliente {
+  id        Int      @id @default(autoincrement())
+  nome      String   @unique
+  documento String?  // CNPJ/CPF
+  contato   String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  contratos Contrato[]
+  ordens    OrdemServico[]
+  faturas   Fatura[]
+  notas     NotaFiscal[]
+  chamados  Chamado[]
+
+  @@map("clientes")
+}
+
+model Cargo {
+  id          Int      @id @default(autoincrement())
+  nome        String
+  nivel       String
+  salarioBase Decimal  @map("salario_base") @db.Decimal(12, 2)
+  ativo       Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  colaboradores Colaborador[]
+
+  @@unique([nome, nivel])
+  @@map("cargos")
+}
+
+model Colaborador {
+  id              Int      @id @default(autoincrement())
+  nome            String
+  email           String?  @unique
+  cargoId         Int?     @map("cargo_id")
+  funcao          String?
+  disponibilidade String   @default("Disponível")
+  ativo           Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  cargo        Cargo?         @relation(fields: [cargoId], references: [id], onDelete: SetNull)
+  ferias       Ferias[]
+  afastamentos Afastamento[]
+  bancoHoras   BancoHoras[]
+  equipamentos Equipamento[]
+  ordens       OrdemServico[]
+  chamados     Chamado[]
+
+  @@index([nome])
+  @@index([cargoId])
+  @@map("colaboradores")
+}
+
+model Servico {
+  id        Int      @id @default(autoincrement())
+  nome      String   @unique
+  categoria String
+  slaHoras  Int      @map("sla_horas")
+  preco     Decimal  @db.Decimal(12, 2)
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  ordens   OrdemServico[]
+  chamados Chamado[]
+
+  @@map("servicos")
+}
+
+// ---------------------------------------------------------------
+// GESTÃO DE PESSOAS
+// ---------------------------------------------------------------
+
+model Ferias {
+  id            Int      @id @default(autoincrement())
+  colaboradorId Int      @map("colaborador_id")
+  inicio        DateTime @db.Date
+  fim           DateTime @db.Date
+  status        String   @default("Pendente")
+  observacao    String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  colaborador Colaborador @relation(fields: [colaboradorId], references: [id], onDelete: Cascade)
+
+  @@index([colaboradorId])
+  @@index([inicio])
+  @@map("ferias")
+}
+
+model Afastamento {
+  id            Int       @id @default(autoincrement())
+  colaboradorId Int       @map("colaborador_id")
+  tipo          String
+  inicio        DateTime  @db.Date
+  fim           DateTime? @db.Date
+  status        String    @default("Em andamento")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  colaborador Colaborador @relation(fields: [colaboradorId], references: [id], onDelete: Cascade)
+
+  @@index([colaboradorId])
+  @@map("afastamentos")
+}
+
+model BancoHoras {
+  id               Int      @id @default(autoincrement())
+  colaboradorId    Int      @map("colaborador_id")
+  competencia      DateTime @db.Date // sempre o dia 1 do mês de referência
+  saldoAnteriorMin Int      @default(0) @map("saldo_anterior_min")
+  movimentacaoMin  Int      @default(0) @map("movimentacao_min")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  colaborador Colaborador @relation(fields: [colaboradorId], references: [id], onDelete: Cascade)
+
+  @@unique([colaboradorId, competencia])
+  @@map("banco_horas")
+}
+
+model Equipamento {
+  id            Int       @id @default(autoincrement())
+  descricao     String
+  patrimonio    String    @unique
+  responsavelId Int?      @map("responsavel_id")
+  entrega       DateTime? @db.Date
+  devolucao     DateTime? @db.Date
+  status        String    @default("Disponível")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  responsavel Colaborador? @relation(fields: [responsavelId], references: [id], onDelete: SetNull)
+
+  @@index([responsavelId])
+  @@map("equipamentos")
+}
+
+model Contratacao {
+  id        Int       @id @default(autoincrement())
+  candidato String
+  vaga      String
+  etapa     String
+  previsao  DateTime? @db.Date
+  status    String    @default("Em andamento")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@map("contratacoes")
+}
+
+model Contrato {
+  id          Int       @id @default(autoincrement())
+  numero      String    @unique
+  clienteId   Int       @map("cliente_id")
+  escopo      String
+  vigenciaFim DateTime  @map("vigencia_fim") @db.Date
+  status      String    @default("Em execução")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+
+  @@index([clienteId])
+  @@map("contratos")
+}
+
+// Kanban genérico: um "quadro" (ex.: "pessoas") com colunas e cards ordenados.
+model KanbanColuna {
+  id     Int    @id @default(autoincrement())
+  quadro String
+  titulo String
+  ordem  Int
+
+  cards KanbanCard[]
+
+  @@unique([quadro, ordem])
+  @@map("kanban_colunas")
+}
+
+model KanbanCard {
+  id        Int      @id @default(autoincrement())
+  colunaId  Int      @map("coluna_id")
+  titulo    String
+  etiqueta  String?
+  ordem     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  coluna KanbanColuna @relation(fields: [colunaId], references: [id], onDelete: Cascade)
+
+  @@index([colunaId, ordem])
+  @@map("kanban_cards")
+}
+
+// ---------------------------------------------------------------
+// ORDENS DE SERVIÇO E FINANCEIRO
+// ---------------------------------------------------------------
+
+model OrdemServico {
+  id            Int       @id @default(autoincrement())
+  numero        String    @unique
+  clienteId     Int       @map("cliente_id")
+  servicoId     Int?      @map("servico_id")
+  responsavelId Int?      @map("responsavel_id")
+  descricao     String?
+  prazo         DateTime  @db.Date
+  status        String    @default("Aberta")
+  concluidaEm   DateTime? @map("concluida_em")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  cliente     Cliente      @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  servico     Servico?     @relation(fields: [servicoId], references: [id], onDelete: SetNull)
+  responsavel Colaborador? @relation(fields: [responsavelId], references: [id], onDelete: SetNull)
+  faturas     Fatura[]
+
+  @@index([clienteId])
+  @@index([responsavelId])
+  @@index([status])
+  @@map("ordens_servico")
+}
+
+model Fatura {
+  id         Int       @id @default(autoincrement())
+  clienteId  Int       @map("cliente_id")
+  ordemId    Int?      @map("ordem_id")
+  referencia String?
+  valor      Decimal   @db.Decimal(12, 2)
+  vencimento DateTime  @db.Date
+  status     String    @default("Em aberto")
+  pagoEm     DateTime? @map("pago_em") @db.Date
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  cliente Cliente       @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  ordem   OrdemServico? @relation(fields: [ordemId], references: [id], onDelete: SetNull)
+  notas   NotaFiscal[]
+
+  @@index([clienteId])
+  @@index([vencimento])
+  @@map("faturas")
+}
+
+model NotaFiscal {
+  id        Int      @id @default(autoincrement())
+  numero    String   @unique
+  clienteId Int      @map("cliente_id")
+  faturaId  Int?     @map("fatura_id")
+  valor     Decimal  @db.Decimal(12, 2)
+  emissao   DateTime @db.Date
+  status    String   @default("Emitida")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  fatura  Fatura? @relation(fields: [faturaId], references: [id], onDelete: SetNull)
+
+  @@index([clienteId])
+  @@map("notas_fiscais")
+}
+
+// ---------------------------------------------------------------
+// SLA
+// ---------------------------------------------------------------
+
+// O risco (No prazo / Atenção / Crítico / Atrasado) e o tempo restante são
+// calculados a partir de prazoEm e concluidoEm — nunca digitados.
+model Chamado {
+  id            Int       @id @default(autoincrement())
+  codigo        String    @unique
+  clienteId     Int       @map("cliente_id")
+  servicoId     Int?      @map("servico_id")
+  responsavelId Int?      @map("responsavel_id")
+  descricao     String?
+  abertoEm      DateTime  @default(now()) @map("aberto_em")
+  prazoEm       DateTime  @map("prazo_em")
+  concluidoEm   DateTime? @map("concluido_em")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  cliente     Cliente      @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  servico     Servico?     @relation(fields: [servicoId], references: [id], onDelete: SetNull)
+  responsavel Colaborador? @relation(fields: [responsavelId], references: [id], onDelete: SetNull)
+
+  @@index([prazoEm])
+  @@index([responsavelId])
+  @@index([concluidoEm])
+  @@map("chamados")
+}
+
+// ---------------------------------------------------------------
+// GERAL
+// ---------------------------------------------------------------
+
+model Evento {
+  id        Int      @id @default(autoincrement())
+  titulo    String
+  inicio    DateTime
+  modulo    String?  // pessoas | os | sla (opcional, para colorir)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([inicio])
+  @@map("eventos")
+}

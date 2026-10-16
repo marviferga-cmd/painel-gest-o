@@ -1,0 +1,37 @@
+# Sobe banco + painel localmente (ou num servidor próprio):
+#   docker compose up -d --build
+#   docker compose exec app npm run db:seed     # opcional: dados de exemplo
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: painel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-painel}
+      POSTGRES_DB: painel
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U painel -d painel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://painel:${POSTGRES_PASSWORD:-painel}@db:5432/painel?schema=public
+      PORT: 3000
+      APP_TZ: America/Sao_Paulo
+      APP_USER: ${APP_USER:-}
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      ALLOW_DEMO_RESET: ${ALLOW_DEMO_RESET:-false}
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
