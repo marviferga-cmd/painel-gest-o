@@ -47,10 +47,12 @@ app.get("/login.html", carregarUsuario, (req, res, next) => (req.user ? res.redi
 
 app.use("/api", express.json({ limit: "100kb" }), api);
 
+/* HTML, JS e CSS sempre revalidam (ETag → 304 barato): depois de um deploy o
+   navegador não mistura HTML novo com script antigo. Fontes/imagens podem ficar em cache. */
 app.use(express.static(path.join(__dirname, "..", "public"), {
   maxAge: isProd ? "1h" : 0,
   setHeaders(res, file) {
-    if (file.endsWith(".html")) res.setHeader("Cache-Control", "no-cache");
+    if (/\.(html|js|css|json)$/.test(file)) res.setHeader("Cache-Control", "no-cache");
   },
 }));
 
