@@ -27,12 +27,18 @@ function cellHTML(col, row){
    HOME
    ========================================================= */
 function renderHomeView(container, meta){
+  const h = new Date().getHours();
+  const saudacao = h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite";
+  const primeiro = meta.user ? meta.user.nome.trim().split(/\s+/)[0] : "";
+  const telas = meta.groups.filter(g => g.key !== "admin").reduce((n, g) => n + g.items.length, 0);
   container.innerHTML = `
     <div class="home-screen">
       <div class="home-header">
-        <span class="eyebrow">Painel de Gestão</span>
-        <h1>Selecione um painel para acessar os dados</h1>
-        <p>Gestão de Pessoas, Ordens de Serviço e Monitoramento de SLA em um só lugar.</p>
+        <span class="eyebrow">${esc(App.brand)}</span>
+        <h1>${saudacao}${primeiro ? `, ${esc(primeiro)}` : ""}</h1>
+        <p>${telas
+          ? `Você tem acesso a ${telas} ${telas > 1 ? "painéis" : "painel"}. Selecione um para começar.`
+          : "Seu acesso ainda não inclui nenhuma tela. Fale com o administrador do painel."}</p>
       </div>
       ${meta.groups.map(group => `
         <div class="home-group">
@@ -41,6 +47,7 @@ function renderHomeView(container, meta){
             ${group.items.map(item => `
               <button class="home-card" data-key="${esc(item.key)}">
                 <div class="home-icon acc-${esc(item.accent)}">${iconSVG(item.icon)}</div>
+                ${isConsulta(item) ? `<span class="home-tag">${iconSVG("eye")}Consulta</span>` : ""}
                 <h3>${esc(item.label)}</h3>
                 <p>${esc(item.desc)}</p>
                 <span class="home-link">Acessar painel →</span>
@@ -95,7 +102,8 @@ async function renderTableView(container, item){
   const visible = item.columns.filter(c => c.table);
   const statusCol = visible.find(c => c.key === "status") || visible.find(c => c.type === "status" || c.type === "bool");
   const filterCols = detectFilterColumns(rows, visible);
-  const editable = !item.readOnly;
+  const editable = !item.readOnly && item.nivel !== "ver";
+  let filtered = rows;
 
   container.innerHTML = `
     ${buildKpiRow(rows, statusCol)}
@@ -123,9 +131,12 @@ async function renderTableView(container, item){
           <h2>${esc(item.label)}</h2>
           <p id="rowCountLabel"></p>
         </div>
-        ${editable
-          ? `<button class="btn btn-primary" id="addRowBtn">+ Adicionar</button>`
-          : `<span class="readonly-note">Calculado automaticamente</span>`}
+        <div class="panel-actions">
+          <button class="btn btn-ghost" id="exportBtn" title="Baixar as linhas filtradas em CSV (abre no Excel)">${iconSVG("download")}Exportar</button>
+          ${editable
+            ? `<button class="btn btn-primary" id="addRowBtn">+ Adicionar</button>`
+            : `<span class="readonly-note">${item.readOnly ? "Calculado automaticamente" : "Somente consulta"}</span>`}
+        </div>
       </div>
       <div class="table-wrap">
         <table class="data-table">
@@ -142,7 +153,7 @@ async function renderTableView(container, item){
   function drawBody(){
     const search = searchEl.value.trim().toLowerCase();
     const active = selects.filter(s => s.value).map(s => [visible.find(c => c.key === s.dataset.filterCol), s.value]);
-    const filtered = rows.filter(row => {
+    filtered = rows.filter(row => {
       if (search && !visible.map(c => String(cellText(c, row))).join(" ").toLowerCase().includes(search)) return false;
       return active.every(([col, val]) => String(cellText(col, row)) === val);
     });
@@ -186,6 +197,11 @@ async function renderTableView(container, item){
     App.refreshNavCounts();
   }
 
+  container.querySelector("#exportBtn").addEventListener("click", () => {
+    const hoje = new Date().toISOString().slice(0, 10);
+    downloadCSV(`${item.key}-${hoje}.csv`, visible.map(c => c.label), filtered.map(row => visible.map(c => cellText(c, row))));
+  });
+
   searchEl.addEventListener("input", drawBody);
   selects.forEach(sel => sel.addEventListener("change", drawBody));
 
@@ -215,15 +231,16 @@ async function renderKanbanView(container, item){
   catch(err){ container.innerHTML = errorHTML(err); return; }
 
   const reload = () => renderKanbanView(container, item);
+  const canEdit = item.nivel !== "ver";
 
   container.innerHTML = `
     <div class="panel" style="padding:18px;">
       <div class="panel-head" style="border:none; padding:0 0 16px;">
         <div>
           <h2>${esc(item.label)}</h2>
-          <p>${data.cards.length} card(s) — arraste entre as colunas</p>
+          <p>${data.cards.length} card(s)${canEdit ? " — arraste entre as colunas" : ""}</p>
         </div>
-        <button class="btn btn-primary" id="addCardBtn">+ Novo card</button>
+        ${canEdit ? `<button class="btn btn-primary" id="addCardBtn">+ Novo card</button>` : `<span class="readonly-note">Somente consulta</span>`}
       </div>
       <div class="kanban">
         ${data.columns.map(col => {
@@ -232,10 +249,10 @@ async function renderKanbanView(container, item){
           <div class="kanban-col" data-col="${col.id}">
             <div class="kanban-col-head"><h3>${esc(col.titulo)}</h3><span>${cards.length}</span></div>
             ${cards.map(c => `
-              <div class="kanban-card" draggable="true" data-card="${c.id}">
+              <div class="kanban-card${canEdit ? "" : " is-static"}" draggable="${canEdit}" data-card="${c.id}">
                 <div class="kc-title">${esc(c.titulo)}</div>
                 <div class="kc-meta"><span class="kc-tag">${esc(c.etiqueta || "")}</span>
-                  <button class="icon-btn kc-del" data-del-card="${c.id}" title="Excluir card" aria-label="Excluir card">✕</button>
+                  ${canEdit ? `<button class="icon-btn kc-del" data-del-card="${c.id}" title="Excluir card" aria-label="Excluir card">✕</button>` : ""}
                 </div>
               </div>`).join("")}
           </div>`;
@@ -243,6 +260,8 @@ async function renderKanbanView(container, item){
       </div>
     </div>
   `;
+
+  if (!canEdit) return;
 
   container.querySelectorAll(".kanban-card").forEach(cardEl => {
     cardEl.addEventListener("dragstart", e => {
@@ -477,6 +496,7 @@ async function renderWeekView(container, item){
   try { events = await API.get(`/eventos?de=${encodeURIComponent(monday.toISOString())}&ate=${encodeURIComponent(nextMonday.toISOString())}`); }
   catch(err){ container.innerHTML = errorHTML(err); return; }
 
+  const canEdit = item.nivel !== "ver";
   const today = new Date(); today.setHours(0,0,0,0);
   const fmt = d => d.toLocaleDateString("pt-BR", { day:"2-digit", month:"2-digit" });
   const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
@@ -493,11 +513,11 @@ async function renderWeekView(container, item){
         <div class="week-events">
           ${dayEvents.map(ev => `
             <div class="week-event mod-${esc(ev.modulo || "geral")}" title="${esc(MODULO_LABEL[ev.modulo] || "Geral")}">
-              <button class="we-del" data-del-ev="${ev.id}" aria-label="Excluir evento">×</button>
+              ${canEdit ? `<button class="we-del" data-del-ev="${ev.id}" aria-label="Excluir evento">×</button>` : ""}
               <span class="we-time">${new Date(ev.inicio).toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" })}</span>${esc(ev.titulo)}
             </div>`).join("")}
         </div>
-        <button class="week-day-add" data-add-day="${i}">+ evento</button>
+        ${canEdit ? `<button class="week-day-add" data-add-day="${i}">+ evento</button>` : ""}
       </div>`;
   }).join("");
 
@@ -506,7 +526,7 @@ async function renderWeekView(container, item){
       <div class="week-rail-head">
         <div>
           <h2>${esc(item.label)}</h2>
-          <p style="font-size:12px;color:var(--muted);margin-top:3px;">Compromissos dos três módulos</p>
+          <p style="font-size:12px;color:var(--muted);margin-top:3px;">Compromissos dos três módulos${canEdit ? "" : " · somente consulta"}</p>
         </div>
         <div class="week-nav">
           <button id="weekPrev" aria-label="Semana anterior">‹</button>
@@ -559,202 +579,14 @@ async function renderWeekView(container, item){
 }
 
 /* =========================================================
-   USUÁRIOS E ACESSO (só admins)
-   ========================================================= */
-const STATUS_USUARIO = { pendente: "Pendente", ativo: "Ativo", bloqueado: "Bloqueado" };
-
-function checkGroupsHTML(telas, checked){
-  const grupos = [...new Set(telas.map(t => t.grupo))];
-  return `<div class="check-groups">${grupos.map(g => `
-    <div>
-      <div class="check-group-title">${esc(g)}</div>
-      <div class="check-grid">
-        ${telas.filter(t => t.grupo === g).map(t => `
-          <label class="check-item"><input type="checkbox" value="${esc(t.key)}" ${checked.has(t.key) ? "checked" : ""}>${esc(t.label)}</label>
-        `).join("")}
-      </div>
-    </div>`).join("")}</div>`;
-}
-
-function openPermissionsModal(user, restritas, onSaved){
-  const form = document.getElementById("modalForm");
-  document.getElementById("modalTitle").textContent = `Telas liberadas — ${user.nome}`;
-  form.innerHTML = `
-    <p class="muted-note" style="margin-bottom:14px;line-height:1.5">
-      Marque as telas restritas que essa pessoa pode abrir. As telas não restritas já ficam visíveis para todo usuário aprovado.
-    </p>
-    ${checkGroupsHTML(restritas, new Set(user.permissoes))}
-    <p class="form-error" hidden></p>
-    <div class="modal-actions"><button type="submit" class="btn btn-primary modal-submit">Salvar</button></div>`;
-  document.getElementById("modalBackdrop").classList.add("open");
-
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    const marcadas = [...form.querySelectorAll("input[type=checkbox]:checked")].map(i => i.value);
-    // mantém liberações de telas que hoje não estão restritas (valem se voltarem a ser)
-    const chavesRestritas = new Set(restritas.map(t => t.key));
-    const permissoes = [...marcadas, ...user.permissoes.filter(k => !chavesRestritas.has(k))];
-    try {
-      await API.patch(`/usuarios/${user.id}`, { permissoes });
-      App.closeModal();
-      toast("Permissões salvas");
-      onSaved();
-    } catch(err){
-      const el = form.querySelector(".form-error");
-      el.textContent = err.message; el.hidden = false;
-    }
-  };
-}
-
-async function renderUsersView(container){
-  container.innerHTML = loadingHTML();
-  let data;
-  try { data = await API.get("/usuarios"); }
-  catch(err){ container.innerHTML = errorHTML(err); return; }
-
-  const { usuarios, telas } = data;
-  const me = App.meta.user.id;
-  const restritas = telas.filter(t => t.restrita);
-  const chavesRestritas = new Set(restritas.map(t => t.key));
-  const labelTela = Object.fromEntries(telas.map(t => [t.key, t.label]));
-  const pendentes = usuarios.filter(u => u.status === "pendente").length;
-  App.setPendingBadge(pendentes);
-  const reload = () => renderUsersView(container);
-
-  const telasCell = (u) => {
-    if (u.papel === "admin") return `<span class="muted-note">Todas (administrador)</span>`;
-    const lib = u.permissoes.filter(k => chavesRestritas.has(k));
-    return lib.length
-      ? `<div class="tela-chips">${lib.map(k => `<span class="tela-chip">${esc(labelTela[k])}</span>`).join("")}</div>`
-      : `<span class="muted-note">Nenhuma</span>`;
-  };
-
-  const actionsCell = (u) => {
-    const self = u.id === me;
-    const main = u.status === "pendente"
-      ? `<button class="icon-btn primary" data-act="aprovar" data-id="${u.id}">Aprovar</button>`
-      : (u.papel !== "admin" ? `<button class="icon-btn" data-act="permissoes" data-id="${u.id}">Permissões</button>` : "");
-    const opts = [
-      u.status === "pendente" && ["recusar", "Recusar e excluir"],
-      u.status === "ativo" && !self && ["bloquear", "Bloquear acesso"],
-      u.status === "bloqueado" && ["ativar", "Desbloquear"],
-      u.status === "ativo" && u.papel !== "admin" && ["admin", "Tornar administrador"],
-      u.papel === "admin" && !self && ["usuario", "Remover administrador"],
-      !self && ["senha", "Definir nova senha"],
-      !self && u.status !== "pendente" && ["excluir", "Excluir conta"],
-    ].filter(Boolean);
-    const more = opts.length
-      ? `<select class="icon-btn" data-more="${u.id}" aria-label="Mais ações"><option value="">Mais…</option>${opts.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("")}</select>`
-      : "";
-    return `<div class="user-actions">${main}${more}</div>`;
-  };
-
-  container.innerHTML = `
-    <div class="users-stack">
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>Usuários</h2>
-            <p>${usuarios.length} conta(s)${pendentes ? ` · <strong style="color:var(--amber)">${pendentes} aguardando aprovação</strong>` : ""}</p>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead><tr><th>Usuário</th><th>Situação</th><th>Papel</th><th>Telas restritas liberadas</th><th>Último acesso</th><th></th></tr></thead>
-            <tbody>
-              ${usuarios.map(u => `
-                <tr>
-                  <td><div class="user-cell"><strong>${esc(u.nome)}${u.id === me ? " (você)" : ""}</strong><span>${esc(u.email)}</span></div></td>
-                  <td>${badgeHTML(STATUS_USUARIO[u.status] ?? u.status)}</td>
-                  <td>${u.papel === "admin" ? `<span class="badge info">Administrador</span>` : `<span class="badge neutral">Usuário</span>`}</td>
-                  <td>${telasCell(u)}</td>
-                  <td><span class="mono">${u.ultimoAcesso ? esc(fmtDateTime(u.ultimoAcesso)) : "—"}</span></td>
-                  <td>${actionsCell(u)}</td>
-                </tr>`).join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>Telas restritas</h2>
-            <p>Telas marcadas só abrem para administradores e para quem você liberar. As demais ficam visíveis para todo usuário aprovado.</p>
-          </div>
-        </div>
-        <form id="restritasForm">
-          ${checkGroupsHTML(telas, chavesRestritas)}
-          <div class="panel-foot"><button type="submit" class="btn btn-primary">Salvar telas restritas</button></div>
-        </form>
-      </div>
-    </div>
-  `;
-
-  const byId = (id) => usuarios.find(u => u.id === Number(id));
-  const run = async (fn, okMsg) => {
-    try { await fn(); toast(okMsg); reload(); }
-    catch(err){ toast(err.message, "bad"); reload(); }
-  };
-
-  container.querySelectorAll("[data-act]").forEach(btn => btn.addEventListener("click", async () => {
-    const u = byId(btn.dataset.id);
-    if (btn.dataset.act === "permissoes"){
-      if (!restritas.length) return toast("Nenhuma tela está marcada como restrita", "bad");
-      return openPermissionsModal(u, restritas, reload);
-    }
-    // aprovar: libera a conta e já oferece escolher as telas restritas
-    try {
-      await API.patch(`/usuarios/${u.id}`, { status: "ativo" });
-      toast(`${u.nome} aprovado(a)`);
-      if (restritas.length) openPermissionsModal({ ...u, status: "ativo" }, restritas, reload);
-    } catch(err){ toast(err.message, "bad"); }
-    reload();
-  }));
-
-  container.querySelectorAll("[data-more]").forEach(sel => sel.addEventListener("change", () => {
-    const u = byId(sel.dataset.more);
-    const act = sel.value;
-    sel.value = "";
-    switch (act){
-      case "bloquear":
-        if (confirm(`Bloquear o acesso de ${u.nome}? A pessoa será desconectada.`))
-          run(() => API.patch(`/usuarios/${u.id}`, { status: "bloqueado" }), "Acesso bloqueado");
-        break;
-      case "ativar": run(() => API.patch(`/usuarios/${u.id}`, { status: "ativo" }), "Acesso liberado"); break;
-      case "admin":
-        if (confirm(`Tornar ${u.nome} administrador? Administradores veem todas as telas e gerenciam usuários.`))
-          run(() => API.patch(`/usuarios/${u.id}`, { papel: "admin" }), "Agora é administrador");
-        break;
-      case "usuario": run(() => API.patch(`/usuarios/${u.id}`, { papel: "usuario" }), "Administrador removido"); break;
-      case "recusar":
-      case "excluir":
-        if (confirm(`Excluir a conta de ${u.nome}? Essa ação não pode ser desfeita.`))
-          run(() => API.del(`/usuarios/${u.id}`), "Conta excluída");
-        break;
-      case "senha":
-        App.openFormModal({
-          title: `Nova senha — ${u.nome}`,
-          fields: [{ key: "senha", label: "Nova senha", type: "password", required: true, hint: "Mínimo de 8 caracteres. Repasse para a pessoa por um canal seguro." }],
-          onSubmit: async (v) => { await API.post(`/usuarios/${u.id}/senha`, { senha: v.senha }); toast("Senha redefinida"); },
-        });
-        break;
-    }
-  }));
-
-  container.querySelector("#restritasForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const chaves = [...e.currentTarget.querySelectorAll("input[type=checkbox]:checked")].map(i => i.value);
-    run(() => API.put("/usuarios/telas-restritas", { chaves }), "Telas restritas atualizadas");
-  });
-}
-
-/* =========================================================
    DISPATCH
    ========================================================= */
 function renderModule(container, item){
   switch (item.type){
     case "users": return renderUsersView(container);
+    case "profiles": return renderProfilesView(container);
+    case "activity": return renderActivityView(container);
+    case "settings": return renderSettingsView(container);
     case "table": return renderTableView(container, item);
     case "kanban": return renderKanbanView(container, item);
     case "report": return renderReportView(container, item);

@@ -1,4 +1,4 @@
-# Painel de Gestão v2
+# Painel de Gestão v3
 
 Painel único de **Gestão de Pessoas**, **Ordens de Serviço** e **Monitoramento de SLA**, agora com backend próprio e banco relacional:
 
@@ -31,13 +31,15 @@ painel-gestao/
 ├── src/
 │   ├── server.js                   → Express, segurança, login, arquivos estáticos
 │   ├── routes.js                   → rotas /api
-│   ├── auth.js                     → login, cadastro, sessões, permissões, admin de usuários
+│   ├── auth.js                     → login, cadastro, convites, sessões, nível de acesso por tela
+│   ├── admin.js                    → /api/admin: usuários, convites, perfis, configurações, histórico
+│   ├── config.js                   → configurações do painel + registro de atividades
 │   ├── modules.js                  → definição dos módulos (colunas, validações, cálculos)
 │   ├── crud.js                     → CRUD genérico + listas para os selects
 │   ├── db.js                       → Prisma Client (driver pg, sem binário nativo)
 │   └── lib/format.js               → datas, horas, dinheiro, regras de SLA
-├── public/                         → frontend (index.html, css, js)
-├── Dockerfile · docker-compose.yml · render.yaml
+├── public/                         → frontend (index.html, login.html, convite.html, css, js)
+├── Dockerfile · docker-compose.yml · railway.json · render.yaml
 └── .env.example
 ```
 
@@ -66,14 +68,34 @@ docker compose exec app npm run db:seed   # opcional
 
 ## Deploy
 
-### Opção 1 — Render (mais simples, tem plano gratuito)
+### Opção 1 — Railway (recomendado)
 
-1. Suba esta pasta para um repositório no GitHub.
-2. No Render: **New → Blueprint** e escolha o repositório. O `render.yaml` cria o banco PostgreSQL e o serviço web.
-3. Informe `ADMIN_EMAIL` e `ADMIN_PASSWORD` quando o Render pedir: é a conta do administrador, criada na primeira inicialização.
-4. Ao final do deploy, as migrações já terão rodado (`npm run start:prod`). Para dados de exemplo, abra o **Shell** do serviço e rode `npm run db:seed`.
+O `railway.json` já configura tudo: build pelo `Dockerfile`, migrações automáticas na inicialização (`npm run start:prod`) e health check em `/healthz`.
 
-### Opção 2 — Docker em qualquer servidor/VM
+1. No [Railway](https://railway.com): **New Project → Deploy from GitHub repo** e escolha este repositório.
+2. No mesmo projeto: **+ Create → Database → PostgreSQL**.
+3. No serviço do painel, aba **Variables**, adicione:
+
+   | Variável | Valor |
+   |---|---|
+   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (referência ao banco do projeto) |
+   | `NODE_ENV` | `production` |
+   | `APP_TZ` | `America/Sao_Paulo` |
+   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | conta do primeiro administrador (senha com 8+ caracteres) |
+   | `ALLOW_DEMO_RESET` | `false` |
+
+4. Aba **Settings → Networking → Generate Domain** para ter a URL pública (HTTPS).
+5. Dados de exemplo (opcional): `railway run npm run db:seed` com a CLI ligada ao projeto.
+
+Pela CLI (`npm i -g @railway/cli`), o equivalente é `railway init`, `railway add --database postgres`, `railway variables --set ...` e `railway up`.
+
+### Opção 2 — Render
+
+1. No Render: **New → Blueprint** e escolha o repositório. O `render.yaml` cria o banco PostgreSQL e o serviço web.
+2. Informe `ADMIN_EMAIL` e `ADMIN_PASSWORD` quando o Render pedir.
+3. Para dados de exemplo, abra o **Shell** do serviço e rode `npm run db:seed`.
+
+### Opção 3 — Docker em qualquer servidor/VM
 
 ```bash
 docker build -t painel-gestao .
@@ -85,10 +107,6 @@ docker run -d -p 3000:3000 \
 
 O contêiner aplica as migrações ao iniciar e expõe `/healthz` para o health check.
 
-### Opção 3 — Railway, Fly.io, Koyeb etc.
-
-Qualquer plataforma Node funciona: build `npm ci`, start `npm run start:prod`, variável `DATABASE_URL` apontando para um PostgreSQL (Neon e Supabase têm planos gratuitos; use a URL com `sslmode=require`).
-
 ## Variáveis de ambiente
 
 | Variável | Para que serve |
@@ -98,6 +116,8 @@ Qualquer plataforma Node funciona: build `npm ci`, start `npm run start:prod`, v
 | `APP_TZ` | Fuso para "hoje" em vencimentos e prazos (padrão `America/Sao_Paulo`) |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NOME` | Conta do administrador inicial, criada se não existir. **Obrigatório em produção.** A senha só vale na criação. |
 | `ALLOW_DEMO_RESET` | `true` mostra o botão "Restaurar dados de exemplo" (apaga o banco). Use `false` em produção. |
+
+Nome do painel, cor, cadastro público, perfil padrão e validade dos convites ficam no banco e são alterados pela tela *Administração → Configurações*.
 
 ## API
 
@@ -111,15 +131,35 @@ Qualquer plataforma Node funciona: build `npm ci`, start `npm run start:prod`, v
 | GET / POST / DELETE | `/api/eventos` | Agenda (`?de=ISO&ate=ISO`) |
 | GET | `/api/resumo/os` · `/clientes` · `/sla` · `/alertas` | Indicadores calculados |
 | POST | `/api/auth/login` · `/cadastro` · `/logout` · `/senha` | Sessão e conta do usuário |
-| GET / PATCH / POST / DELETE | `/api/usuarios[/:id]` · PUT `/api/usuarios/telas-restritas` | Administração de usuários (só admin) |
+| GET | `/api/auth/config` | Nome, cor e se o cadastro público está aberto (usado no login) |
+| GET / POST | `/api/auth/convite[/:token]` | Valida o link e define a senha (convite ou redefinição) |
+| GET / POST / PATCH / DELETE | `/api/admin/usuarios[/:id]` · POST `/convite` · POST `/:id/link` | Usuários e convites (só admin) |
+| GET / POST / PUT / DELETE | `/api/admin/perfis[/:id]` | Perfis de acesso (só admin) |
+| GET / PUT | `/api/admin/config` | Configurações do painel (só admin) |
+| GET | `/api/admin/atividades?tela=&antes=` | Histórico de alterações (só admin) |
 | GET | `/healthz` | Verifica servidor e banco |
 
-## Login e permissões
+## Acesso de colaboradores
 
-- Qualquer pessoa pode **criar conta** na tela de login, mas só entra depois que um administrador **aprovar** (menu *Administração → Usuários e acesso*, que mostra um contador de pendentes).
-- Na mesma tela o admin marca quais **telas são restritas**. Telas restritas só aparecem (e só respondem na API) para administradores e para quem tiver a tela liberada. As demais ficam visíveis para todo usuário aprovado. Por padrão vêm restritas: *Cargos e Salários*, *Faturamento* e *Notas Fiscais*.
-- O admin também pode bloquear contas, promover outros administradores, redefinir senhas e excluir contas. Cada usuário troca a própria senha pelo menu com seu nome, no topo.
-- Senhas guardadas com scrypt; sessão em cookie `HttpOnly` de 7 dias; limite de tentativas de login por IP.
+**Convite (recomendado).** Em *Administração → Usuários e convites → Convidar colaborador*, escolha o colaborador já cadastrado (nome e e-mail vêm sozinhos) ou digite os dados, defina o acesso e clique em *Criar convite*. O painel gera um link para a pessoa criar a própria senha, com botões para copiar, enviar por e-mail ou WhatsApp. O link vale por alguns dias (configurável), serve uma única vez e não fica salvo: se perder, gere outro.
+
+**Cadastro público.** Opcional (liga/desliga em *Configurações*). A pessoa cria a conta na tela de login e espera a aprovação; ao aprovar, o admin escolhe o acesso, ou o *perfil padrão* é aplicado.
+
+**O que cada pessoa pode fazer.** Cada tela tem um nível por usuário:
+
+| Nível | Efeito |
+|---|---|
+| Nenhum | A tela não aparece no menu e a API recusa o acesso |
+| Ver | Abre a tela, filtra e exporta CSV, mas não cria, altera, exclui nem move cards |
+| Editar | Acesso completo à tela |
+
+Telas calculadas (relatórios, indicadores, dashboards) só aceitam *Ver*. Administradores editam tudo e são os únicos que veem a Administração.
+
+**Perfis de acesso.** Modelos reutilizáveis (vêm prontos: *Gestão de Pessoas (RH)*, *Operação e Atendimento*, *Financeiro* e *Consulta*). Quem usa um perfil acompanha as mudanças nele na hora; mexer na matriz de uma pessoa transforma o acesso dela em *personalizado*. Excluir um perfil não tira acesso de ninguém: as pessoas ficam com uma cópia das mesmas permissões.
+
+**Outros recursos.** Bloquear (desconecta na hora), gerar link de nova senha, promover administrador (o sistema nunca fica sem um admin ativo), histórico de quem criou/alterou/excluiu cada registro e configurações de nome, subtítulo e cor de destaque do painel.
+
+**Segurança.** Senhas com scrypt; sessão em cookie `HttpOnly` de 7 dias; no banco ficam só os hashes SHA-256 dos tokens de sessão e de convite; limite de tentativas por IP; trocar a senha desconecta os outros dispositivos.
 
 ## Regras de SLA
 

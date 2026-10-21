@@ -6,6 +6,7 @@ import compression from "compression";
 import { prisma } from "./db.js";
 import { api } from "./routes.js";
 import { carregarUsuario, garantirAdmin } from "./auth.js";
+import { limparHistorico } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -41,7 +42,7 @@ app.get("/healthz", async (req, res) => {
 });
 
 /* Login: o painel só abre com sessão; sem ela, vai para a tela de login.
-   A API se protege sozinha (routes.js). css/js/login.html ficam públicos. */
+   A API se protege sozinha (routes.js). css/js/login.html/convite.html ficam públicos. */
 app.get(["/", "/index.html"], carregarUsuario, (req, res, next) => (req.user ? next() : res.redirect("/login.html")));
 app.get("/login.html", carregarUsuario, (req, res, next) => (req.user ? res.redirect("/") : next()));
 
@@ -58,8 +59,9 @@ app.use(express.static(path.join(__dirname, "..", "public"), {
 
 try {
   await garantirAdmin();
+  await limparHistorico();
 } catch (err) {
-  console.error("Não foi possível criar o administrador inicial:", err.message);
+  console.error("Falha na preparação inicial:", err.message);
 }
 
 const server = app.listen(PORT, () => {

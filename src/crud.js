@@ -102,8 +102,9 @@ export async function updateRow(prisma, mod, id, body) {
 }
 
 export async function deleteRow(prisma, mod, id) {
-  await fetchOne(prisma, mod, id);
+  const rec = await fetchOne(prisma, mod, id);
   await prisma[mod.model].delete({ where: { id } });
+  return toRow(mod, rec);
 }
 
 /* ---------- listas para os <select> de chaves estrangeiras ---------- */

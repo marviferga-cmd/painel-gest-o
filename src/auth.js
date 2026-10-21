@@ -2,9 +2,10 @@
    AUTENTICAÇÃO E PERMISSÕES
    - Senhas com scrypt (node:crypto), sessão em cookie HttpOnly.
      No banco fica só o SHA-256 do token, nunca o token.
-   - Cadastro livre, mas a conta nasce "pendente" até um admin aprovar.
-   - Telas restritas (tabela telas_restritas) só abrem para admins e
-     para usuários que tenham a chave da tela em `permissoes`.
+   - Contas chegam de dois jeitos: convite do admin (link para definir
+     a senha) ou cadastro público, que nasce "pendente" até a aprovação.
+   - Cada tela tem um nível por usuário: nenhum | ver | editar.
+     Admin edita tudo; os demais seguem o perfil (ou acessos próprios).
    ========================================================= */
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
@@ -12,6 +13,7 @@ import { Router } from "express";
 import { prisma } from "./db.js";
 import { GROUPS, MODULES } from "./modules.js";
 import { ValidationError } from "./lib/format.js";
+import { configPublica, lerConfig, registrar } from "./config.js";
 
 const scrypt = promisify(scryptCb);
 const COOKIE = "painel_sessao";
@@ -26,7 +28,7 @@ export async function hashSenha(senha) {
   return `${salt.toString("hex")}:${hash.toString("hex")}`;
 }
 
-async function confereSenha(senha, guardada) {
+export async function confereSenha(senha, guardada) {
   const [saltHex, hashHex] = String(guardada).split(":");
   if (!saltHex || !hashHex) return false;
   const esperado = Buffer.from(hashHex, "hex");
@@ -38,7 +40,7 @@ async function confereSenha(senha, guardada) {
 const HASH_FALSO = await hashSenha(randomBytes(16).toString("hex"));
 
 /* ---------------- sessões ---------------- */
-const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+export const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
 function lerCookie(req, nome) {
   for (const parte of (req.headers.cookie || "").split(";")) {
@@ -65,7 +67,7 @@ async function iniciarSessao(res, usuarioId) {
 export async function carregarUsuario(req, res, next) {
   const token = lerCookie(req, COOKIE);
   if (token) {
-    const sessao = await prisma.sessao.findUnique({ where: { id: sha256(token) }, include: { usuario: true } });
+    const sessao = await prisma.sessao.findUnique({ where: { id: sha256(token) }, include: { usuario: { include: { perfil: true } } } });
     if (sessao && sessao.expiraEm > new Date() && sessao.usuario.status === "ativo") req.user = sessao.usuario;
   }
   next();
@@ -81,30 +83,75 @@ export function exigirAdmin(req, res, next) {
   res.status(403).json({ error: "Apenas administradores podem fazer isso" });
 }
 
-/* ---------------- permissões por tela ---------------- */
-export async function telasRestritas() {
-  return new Set((await prisma.telaRestrita.findMany()).map((t) => t.chave));
+/* ---------------- acesso por tela ---------------- */
+export const NIVEIS = ["nenhum", "ver", "editar"];
+
+// telas calculadas (relatórios, dashboards…) só fazem sentido como "ver"
+const editavel = (m) => (m.type === "table" && !m.readOnly) || m.type === "kanban" || m.type === "week";
+
+export const TELAS = MODULES.map((m) => ({
+  key: m.key, label: m.label, icon: m.icon,
+  grupo: GROUPS.find((g) => g.key === m.group)?.label ?? m.group,
+  editavel: editavel(m),
+}));
+const TELA = new Map(TELAS.map((t) => [t.key, t]));
+
+/* Limpa um mapa { tela: nivel } vindo do navegador. */
+export function sanitizarAcessos(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) throw new ValidationError("Acessos inválidos");
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const tela = TELA.get(k);
+    if (!tela || !["ver", "editar"].includes(v)) continue;
+    out[k] = v === "editar" && !tela.editavel ? "ver" : v;
+  }
+  return out;
 }
 
-export function podeVer(user, chave, restritas) {
-  return user.papel === "admin" || !restritas.has(chave) || user.permissoes.includes(chave);
+export function nivelAcesso(user, chave) {
+  if (user.papel === "admin") return TELA.get(chave)?.editavel ? "editar" : "ver";
+  const mapa = (user.perfilId && user.perfil ? user.perfil.acessos : user.acessos) ?? {};
+  return ["ver", "editar"].includes(mapa[chave]) ? mapa[chave] : "nenhum";
 }
+export const podeVer = (user, chave) => nivelAcesso(user, chave) !== "nenhum";
+export const podeEditar = (user, chave) => nivelAcesso(user, chave) === "editar";
 
-/* Middleware: libera se o usuário puder ver ALGUMA das telas indicadas.
+/* Middleware: libera se o usuário puder ver (ou editar) ALGUMA das telas indicadas.
    `chaves` pode ser string, lista ou função (req) => string | lista. */
-export function exigirTela(chaves) {
+export function exigirTela(chaves, { editar = false } = {}) {
+  const pode = editar ? podeEditar : podeVer;
   return async (req, res, next) => {
     const lista = [].concat(typeof chaves === "function" ? await chaves(req) : chaves).filter(Boolean);
-    const restritas = await telasRestritas();
-    if (!lista.length || lista.some((k) => podeVer(req.user, k, restritas))) return next();
-    res.status(403).json({ error: "Você não tem permissão para acessar esta tela" });
+    if (!lista.length || lista.some((k) => pode(req.user, k))) return next();
+    res.status(403).json({ error: editar ? "Você só tem permissão de consulta nesta tela" : "Você não tem permissão para acessar esta tela" });
   };
 }
 
 export const usuarioPublico = (u) => ({
   id: u.id, nome: u.nome, email: u.email, papel: u.papel, status: u.status,
-  permissoes: u.permissoes, ultimoAcesso: u.ultimoAcesso, createdAt: u.createdAt,
+  perfilId: u.perfilId, acessos: u.acessos, colaboradorId: u.colaboradorId,
+  conviteExpira: u.conviteExpira, ultimoAcesso: u.ultimoAcesso, createdAt: u.createdAt,
 });
+
+/* ---------------- links de convite / redefinição ---------------- */
+/* Gera um token novo para o usuário (invalida o anterior) e devolve o token
+   em claro, que só é mostrado ao admin para ser repassado. */
+export async function gerarLink(usuarioId) {
+  const token = randomBytes(24).toString("base64url");
+  const { diasConvite } = await lerConfig();
+  await prisma.usuario.update({
+    where: { id: usuarioId },
+    data: { conviteHash: sha256(token), conviteExpira: new Date(Date.now() + diasConvite * 86400e3) },
+  });
+  return token;
+}
+
+async function usuarioDoLink(token) {
+  if (typeof token !== "string" || token.length < 20 || token.length > 100) return null;
+  const u = await prisma.usuario.findUnique({ where: { conviteHash: sha256(token) } });
+  if (!u || !u.conviteExpira || u.conviteExpira < new Date() || !["convidado", "ativo"].includes(u.status)) return null;
+  return u;
+}
 
 /* ---------------- limite de tentativas (memória, por IP) ---------------- */
 const tentativas = new Map();
@@ -124,9 +171,9 @@ setInterval(() => {
 }, 10 * 60e3).unref();
 
 /* ---------------- validação ---------------- */
-const normEmail = (v) => String(v ?? "").trim().toLowerCase();
+export const normEmail = (v) => String(v ?? "").trim().toLowerCase();
 
-function validaSenha(senha) {
+export function validaSenha(senha) {
   if (typeof senha !== "string" || senha.length < SENHA_MIN) throw new ValidationError(`A senha deve ter pelo menos ${SENHA_MIN} caracteres`);
   if (senha.length > 200) throw new ValidationError("Senha longa demais");
 }
@@ -136,6 +183,10 @@ function validaSenha(senha) {
    ========================================================= */
 export const authApi = Router();
 
+authApi.get("/config", async (req, res) => {
+  res.json(await configPublica());
+});
+
 authApi.post("/login", limiteTentativas(10, 15), async (req, res) => {
   const email = normEmail(req.body?.email);
   const senha = String(req.body?.senha ?? "");
@@ -143,6 +194,7 @@ authApi.post("/login", limiteTentativas(10, 15), async (req, res) => {
   const ok = await confereSenha(senha, usuario?.senhaHash ?? HASH_FALSO);
   if (!usuario || !ok) return res.status(401).json({ error: "E-mail ou senha incorretos" });
   if (usuario.status === "pendente") return res.status(403).json({ error: "Seu cadastro ainda aguarda aprovação do administrador." });
+  if (usuario.status === "convidado") return res.status(403).json({ error: "Você ainda não ativou seu convite. Abra o link recebido para definir sua senha." });
   if (usuario.status !== "ativo") return res.status(403).json({ error: "Seu acesso está bloqueado. Fale com o administrador." });
   await iniciarSessao(res, usuario.id);
   res.json({ user: usuarioPublico(usuario) });
@@ -159,6 +211,9 @@ authApi.post("/cadastro", limiteTentativas(5, 60), async (req, res) => {
   // Fora de produção, o primeiro cadastro de um banco vazio vira admin (facilita o desenvolvimento).
   // Em produção o admin vem de ADMIN_EMAIL/ADMIN_PASSWORD (garantirAdmin).
   const primeiro = !isProd && (await prisma.usuario.count()) === 0;
+  if (!primeiro && !(await lerConfig()).cadastroAberto) {
+    return res.status(403).json({ error: "O cadastro público está desativado. Peça um convite ao administrador." });
+  }
   const usuario = await prisma.usuario.create({
     data: { nome, email, senhaHash: await hashSenha(senha), papel: primeiro ? "admin" : "usuario", status: primeiro ? "ativo" : "pendente" },
   }).catch((err) => {
@@ -166,11 +221,35 @@ authApi.post("/cadastro", limiteTentativas(5, 60), async (req, res) => {
     throw err;
   });
 
+  req.user = usuario;
+  registrar(req, "admin", null, primeiro ? "Primeiro acesso: conta de administrador criada" : "Pediu acesso pelo cadastro público");
   if (primeiro) {
     await iniciarSessao(res, usuario.id);
     return res.status(201).json({ pendente: false, user: usuarioPublico(usuario) });
   }
   res.status(201).json({ pendente: true });
+});
+
+/* convite ou redefinição de senha por link */
+authApi.get("/convite/:token", limiteTentativas(30, 15), async (req, res) => {
+  const u = await usuarioDoLink(req.params.token);
+  if (!u) return res.status(404).json({ error: "Link inválido ou expirado. Peça um novo ao administrador." });
+  res.json({ nome: u.nome, email: u.email, tipo: u.status === "convidado" ? "convite" : "redefinicao", ...(await configPublica()) });
+});
+
+authApi.post("/convite", limiteTentativas(10, 15), async (req, res) => {
+  const u = await usuarioDoLink(req.body?.token);
+  if (!u) return res.status(404).json({ error: "Link inválido ou expirado. Peça um novo ao administrador." });
+  validaSenha(req.body?.senha);
+  const usuario = await prisma.usuario.update({
+    where: { id: u.id },
+    data: { senhaHash: await hashSenha(req.body.senha), status: "ativo", conviteHash: null, conviteExpira: null },
+  });
+  await prisma.sessao.deleteMany({ where: { usuarioId: u.id } });
+  await iniciarSessao(res, u.id);
+  req.user = usuario;
+  registrar(req, "admin", null, u.status === "convidado" ? "Aceitou o convite e ativou a conta" : "Redefiniu a senha pelo link");
+  res.json({ user: usuarioPublico(usuario) });
 });
 
 authApi.post("/logout", async (req, res) => {
@@ -184,92 +263,10 @@ authApi.post("/senha", carregarUsuario, exigirLogin, async (req, res) => {
   if (!(await confereSenha(String(req.body?.atual ?? ""), req.user.senhaHash))) throw new ValidationError("Senha atual incorreta");
   validaSenha(req.body?.nova);
   await prisma.usuario.update({ where: { id: req.user.id }, data: { senhaHash: await hashSenha(req.body.nova) } });
+  // desconecta os outros dispositivos; a sessão atual continua
+  const atual = sha256(lerCookie(req, COOKIE) ?? "");
+  await prisma.sessao.deleteMany({ where: { usuarioId: req.user.id, id: { not: atual } } });
   res.json({ ok: true });
-});
-
-/* =========================================================
-   ADMINISTRAÇÃO: /api/usuarios (montado depois de exigirLogin)
-   ========================================================= */
-export const usuariosApi = Router();
-usuariosApi.use(exigirAdmin);
-
-function idParam(req) {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) throw new ValidationError("id inválido");
-  return id;
-}
-
-const CHAVES_TELAS = new Set(MODULES.map((m) => m.key));
-
-async function outrosAdminsAtivos(id) {
-  return prisma.usuario.count({ where: { papel: "admin", status: "ativo", id: { not: id } } });
-}
-
-usuariosApi.get("/", async (req, res) => {
-  const [usuarios, restritas] = await Promise.all([
-    prisma.usuario.findMany({ orderBy: [{ status: "asc" }, { nome: "asc" }] }),
-    telasRestritas(),
-  ]);
-  res.json({
-    usuarios: usuarios.map(usuarioPublico),
-    telas: MODULES.map((m) => ({
-      key: m.key, label: m.label, grupo: GROUPS.find((g) => g.key === m.group)?.label ?? m.group, restrita: restritas.has(m.key),
-    })),
-  });
-});
-
-usuariosApi.patch("/:id", async (req, res) => {
-  const id = idParam(req);
-  const data = {};
-  const { status, papel, permissoes } = req.body ?? {};
-  if (status !== undefined) {
-    if (!["pendente", "ativo", "bloqueado"].includes(status)) throw new ValidationError("Status inválido");
-    data.status = status;
-  }
-  if (papel !== undefined) {
-    if (!["admin", "usuario"].includes(papel)) throw new ValidationError("Papel inválido");
-    data.papel = papel;
-  }
-  if (permissoes !== undefined) {
-    if (!Array.isArray(permissoes)) throw new ValidationError("Permissões inválidas");
-    data.permissoes = [...new Set(permissoes.map(String))].filter((k) => CHAVES_TELAS.has(k));
-  }
-  const perdeAdmin = (data.status && data.status !== "ativo") || data.papel === "usuario";
-  if (perdeAdmin) {
-    const alvo = await prisma.usuario.findUnique({ where: { id } });
-    if (alvo?.papel === "admin" && alvo.status === "ativo" && !(await outrosAdminsAtivos(id))) {
-      throw new ValidationError("O sistema precisa de pelo menos um administrador ativo");
-    }
-  }
-  const usuario = await prisma.usuario.update({ where: { id }, data });
-  if (data.status && data.status !== "ativo") await prisma.sessao.deleteMany({ where: { usuarioId: id } });
-  res.json(usuarioPublico(usuario));
-});
-
-usuariosApi.post("/:id/senha", async (req, res) => {
-  const id = idParam(req);
-  validaSenha(req.body?.senha);
-  await prisma.usuario.update({ where: { id }, data: { senhaHash: await hashSenha(req.body.senha) } });
-  if (id !== req.user.id) await prisma.sessao.deleteMany({ where: { usuarioId: id } });
-  res.json({ ok: true });
-});
-
-usuariosApi.delete("/:id", async (req, res) => {
-  const id = idParam(req);
-  if (id === req.user.id) throw new ValidationError("Você não pode excluir a própria conta");
-  await prisma.usuario.delete({ where: { id } });
-  res.status(204).end();
-});
-
-usuariosApi.put("/telas-restritas", async (req, res) => {
-  const chaves = req.body?.chaves;
-  if (!Array.isArray(chaves)) throw new ValidationError("Lista de telas inválida");
-  const validas = [...new Set(chaves.map(String))].filter((k) => CHAVES_TELAS.has(k));
-  await prisma.$transaction([
-    prisma.telaRestrita.deleteMany(),
-    prisma.telaRestrita.createMany({ data: validas.map((chave) => ({ chave })) }),
-  ]);
-  res.json({ chaves: validas });
 });
 
 /* =========================================================

@@ -6,15 +6,17 @@ import { slaStatus, tempoRestante, todayDate, ValidationError } from "./lib/form
 import { seed } from "../prisma/seed.js";
 import {
   authApi, carregarUsuario, exigirAdmin, exigirLogin, exigirTela,
-  podeVer, telasRestritas, usuarioPublico, usuariosApi,
+  nivelAcesso, podeVer, usuarioPublico,
 } from "./auth.js";
+import { adminApi } from "./admin.js";
+import { configPublica, registrar } from "./config.js";
 
 export const api = Router();
 
 /* login/cadastro ficam abertos; todo o resto exige sessão */
 api.use("/auth", authApi);
 api.use(carregarUsuario, exigirLogin);
-api.use("/usuarios", usuariosApi);
+api.use("/admin", adminApi);
 
 const allowReset = () => process.env.ALLOW_DEMO_RESET === "true";
 
@@ -42,23 +44,41 @@ async function telaDoCard(req) {
   const card = await prisma.kanbanCard.findUnique({ where: { id: idParam(req) }, include: { coluna: { select: { quadro: true } } } });
   return card ? telaDoQuadro(card.coluna.quadro) : null;
 }
+const editar = { editar: true };
+
+/* texto curto do registro para o histórico: valor da primeira coluna */
+function rotulo(mod, row) {
+  const col = mod.columns[0];
+  return row._labels?.[col.key] ?? row[col.key] ?? `#${row.id}`;
+}
 
 /* ---------------- metadados ---------------- */
+const ITENS_ADMIN = [
+  { key: "usuarios", label: "Usuários e convites", icon: "usercheck", accent: "indigo", type: "users",
+    desc: "Convidar colaboradores, aprovar cadastros e definir o que cada pessoa pode ver ou editar." },
+  { key: "perfis", label: "Perfis de acesso", icon: "shield", accent: "violet", type: "profiles",
+    desc: "Modelos de permissão reutilizáveis (RH, Financeiro, Consulta…)." },
+  { key: "atividade", label: "Histórico", icon: "history", accent: "teal", type: "activity",
+    desc: "Quem criou, alterou ou excluiu cada registro, e quando." },
+  { key: "configuracoes", label: "Configurações", icon: "gear", accent: "slate", type: "settings",
+    desc: "Nome e cor do painel, cadastro público e validade dos convites." },
+];
+
 api.get("/meta", async (req, res) => {
-  const restritas = await telasRestritas();
   const meta = publicMeta();
   meta.groups = meta.groups
-    .map((g) => ({ ...g, items: g.items.filter((i) => podeVer(req.user, i.key, restritas)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => podeVer(req.user, i.key)).map((i) => ({ ...i, nivel: nivelAcesso(req.user, i.key) })) }))
     .filter((g) => g.items.length);
   if (req.user.papel === "admin") {
-    meta.groups.push({
-      key: "admin", label: "Administração",
-      items: [{ key: "usuarios", label: "Usuários e acesso", icon: "usercheck", accent: "indigo", type: "users",
-        desc: "Aprovar cadastros, bloquear contas e definir quem pode ver cada tela restrita." }],
-    });
+    meta.groups.push({ key: "admin", label: "Administração", items: ITENS_ADMIN.map((i) => ({ ...i, nivel: "editar" })) });
     meta.pendentes = await prisma.usuario.count({ where: { status: "pendente" } });
   }
-  res.json({ ...meta, user: usuarioPublico(req.user), allowReset: allowReset() && req.user.papel === "admin" });
+  res.json({
+    ...meta,
+    config: await configPublica(),
+    user: { ...usuarioPublico(req.user), perfil: req.user.perfil?.nome ?? null },
+    allowReset: allowReset() && req.user.papel === "admin",
+  });
 });
 
 // a lista de faturas mostra valores: só para quem vê as telas financeiras
@@ -73,16 +93,24 @@ api.get("/modules/:key", exigirTela(telaDoParam), async (req, res) => {
   res.json(await listRows(prisma, tableModule(req)));
 });
 
-api.post("/modules/:key", exigirTela(telaDoParam), async (req, res) => {
-  res.status(201).json(await createRow(prisma, tableModule(req, { write: true }), req.body));
+api.post("/modules/:key", exigirTela(telaDoParam, editar), async (req, res) => {
+  const mod = tableModule(req, { write: true });
+  const row = await createRow(prisma, mod, req.body);
+  registrar(req, "criou", mod.key, `${mod.label}: ${rotulo(mod, row)}`);
+  res.status(201).json(row);
 });
 
-api.put("/modules/:key/:id", exigirTela(telaDoParam), async (req, res) => {
-  res.json(await updateRow(prisma, tableModule(req, { write: true }), idParam(req), req.body));
+api.put("/modules/:key/:id", exigirTela(telaDoParam, editar), async (req, res) => {
+  const mod = tableModule(req, { write: true });
+  const row = await updateRow(prisma, mod, idParam(req), req.body);
+  registrar(req, "alterou", mod.key, `${mod.label}: ${rotulo(mod, row)}`);
+  res.json(row);
 });
 
-api.delete("/modules/:key/:id", exigirTela(telaDoParam), async (req, res) => {
-  await deleteRow(prisma, tableModule(req, { write: true }), idParam(req));
+api.delete("/modules/:key/:id", exigirTela(telaDoParam, editar), async (req, res) => {
+  const mod = tableModule(req, { write: true });
+  const row = await deleteRow(prisma, mod, idParam(req));
+  registrar(req, "excluiu", mod.key, `${mod.label}: ${rotulo(mod, row)}`);
   res.status(204).end();
 });
 
@@ -104,7 +132,7 @@ async function nextOrder(colunaId) {
   return (agg._max.ordem ?? -1) + 1;
 }
 
-api.post("/kanban/:board/cards", exigirTela((req) => telaDoQuadro(req.params.board)), async (req, res) => {
+api.post("/kanban/:board/cards", exigirTela((req) => telaDoQuadro(req.params.board), editar), async (req, res) => {
   const titulo = String(req.body?.titulo ?? "").trim();
   const colunaId = Number(req.body?.colunaId);
   if (!titulo) throw new ValidationError("Título é obrigatório");
@@ -113,24 +141,31 @@ api.post("/kanban/:board/cards", exigirTela((req) => telaDoQuadro(req.params.boa
   const card = await prisma.kanbanCard.create({
     data: { titulo: titulo.slice(0, 300), etiqueta: String(req.body?.etiqueta ?? "").trim() || null, colunaId, ordem: await nextOrder(colunaId) },
   });
+  registrar(req, "criou", telaDoQuadro(req.params.board), `Card "${card.titulo}"`);
   res.status(201).json(card);
 });
 
-api.patch("/kanban/cards/:id", exigirTela(telaDoCard), async (req, res) => {
+api.patch("/kanban/cards/:id", exigirTela(telaDoCard, editar), async (req, res) => {
   const id = idParam(req);
   const data = {};
+  let destino = null;
   if (req.body?.colunaId !== undefined) {
     data.colunaId = Number(req.body.colunaId);
-    if (!(await prisma.kanbanColuna.findUnique({ where: { id: data.colunaId } }))) throw new ValidationError("Coluna inválida");
+    destino = await prisma.kanbanColuna.findUnique({ where: { id: data.colunaId } });
+    if (!destino) throw new ValidationError("Coluna inválida");
     data.ordem = await nextOrder(data.colunaId);
   }
   if (req.body?.titulo !== undefined) data.titulo = String(req.body.titulo).trim().slice(0, 300);
   if (req.body?.etiqueta !== undefined) data.etiqueta = String(req.body.etiqueta).trim() || null;
-  res.json(await prisma.kanbanCard.update({ where: { id }, data }));
+  const card = await prisma.kanbanCard.update({ where: { id }, data });
+  registrar(req, destino ? "moveu" : "alterou", await telaDoCard(req), destino ? `Card "${card.titulo}" → ${destino.titulo}` : `Card "${card.titulo}"`);
+  res.json(card);
 });
 
-api.delete("/kanban/cards/:id", exigirTela(telaDoCard), async (req, res) => {
-  await prisma.kanbanCard.delete({ where: { id: idParam(req) } });
+api.delete("/kanban/cards/:id", exigirTela(telaDoCard, editar), async (req, res) => {
+  const tela = await telaDoCard(req);
+  const card = await prisma.kanbanCard.delete({ where: { id: idParam(req) } });
+  registrar(req, "excluiu", tela, `Card "${card.titulo}"`);
   res.status(204).end();
 });
 
@@ -143,17 +178,20 @@ api.get("/eventos", exigirTela("eventos-semana"), async (req, res) => {
   res.json(eventos);
 });
 
-api.post("/eventos", exigirTela("eventos-semana"), async (req, res) => {
+api.post("/eventos", exigirTela("eventos-semana", editar), async (req, res) => {
   const titulo = String(req.body?.titulo ?? "").trim();
   const inicio = new Date(req.body?.inicio);
   if (!titulo) throw new ValidationError("Descrição é obrigatória");
   if (Number.isNaN(inicio.getTime())) throw new ValidationError("Data/hora inválida");
   const modulo = ["pessoas", "os", "sla"].includes(req.body?.modulo) ? req.body.modulo : null;
-  res.status(201).json(await prisma.evento.create({ data: { titulo: titulo.slice(0, 300), inicio, modulo } }));
+  const evento = await prisma.evento.create({ data: { titulo: titulo.slice(0, 300), inicio, modulo } });
+  registrar(req, "criou", "eventos-semana", `Evento "${evento.titulo}"`);
+  res.status(201).json(evento);
 });
 
-api.delete("/eventos/:id", exigirTela("eventos-semana"), async (req, res) => {
-  await prisma.evento.delete({ where: { id: idParam(req) } });
+api.delete("/eventos/:id", exigirTela("eventos-semana", editar), async (req, res) => {
+  const evento = await prisma.evento.delete({ where: { id: idParam(req) } });
+  registrar(req, "excluiu", "eventos-semana", `Evento "${evento.titulo}"`);
   res.status(204).end();
 });
 
@@ -245,6 +283,7 @@ api.get("/resumo/alertas", exigirTela(["chamados-risco", "dashboards-sla"]), asy
 api.post("/admin/reset", exigirAdmin, async (req, res) => {
   if (!allowReset()) return res.status(403).json({ error: "Restauração desativada neste ambiente (ALLOW_DEMO_RESET)" });
   await seed(prisma);
+  registrar(req, "admin", null, "Restaurou os dados de exemplo");
   res.json({ ok: true });
 });
 
