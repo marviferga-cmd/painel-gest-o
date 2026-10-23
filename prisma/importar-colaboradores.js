@@ -13,6 +13,7 @@
    - --simular mostra o que seria feito sem gravar nada.
    ========================================================= */
 import fs from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const CAMPOS = {
   nome: ["nome", "nome completo", "colaborador"],
@@ -32,7 +33,7 @@ const CAMPOS = {
 const norm = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
 
 /* CSV com aspas, separador ; ou , (detectado pela 1ª linha) */
-function lerCSV(texto) {
+export function lerCSV(texto) {
   texto = texto.replace(/^﻿/, "");
   const sep = (texto.split(/\r?\n/)[0].match(/;/g) || []).length >= (texto.split(/\r?\n/)[0].match(/,/g) || []).length ? ";" : ",";
   const linhas = [];
@@ -113,10 +114,10 @@ export async function importar(prisma, colaboradores, { simular = false } = {}) 
   return res;
 }
 
-/* Execução direta */
+/* Execução direta: node prisma/importar-colaboradores.js arquivo.csv */
 const args = process.argv.slice(2);
 const arquivo = args.find((a) => !a.startsWith("--") && args[args.indexOf(a) - 1] !== "--dominio");
-if (arquivo) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href && arquivo) {
   const dominio = args.includes("--dominio") ? args[args.indexOf("--dominio") + 1] : null;
   const simular = args.includes("--simular");
   const colaboradores = converter(lerCSV(fs.readFileSync(arquivo, "utf8")), { dominio });

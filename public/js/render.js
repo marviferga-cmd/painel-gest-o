@@ -132,6 +132,8 @@ async function renderTableView(container, item){
           <p id="rowCountLabel"></p>
         </div>
         <div class="panel-actions">
+          ${item.key === "colaboradores" && App.meta.user?.papel === "admin"
+            ? `<button class="btn btn-ghost" id="importBtn" title="Criar ou atualizar colaboradores a partir de uma planilha">${iconSVG("upload")}Importar planilha</button>` : ""}
           <button class="btn btn-ghost" id="exportBtn" title="Baixar as linhas filtradas em CSV (abre no Excel)">${iconSVG("download")}Exportar</button>
           ${editable
             ? `<button class="btn btn-primary" id="addRowBtn">+ Adicionar</button>`
@@ -201,6 +203,8 @@ async function renderTableView(container, item){
     const hoje = new Date().toISOString().slice(0, 10);
     downloadCSV(`${item.key}-${hoje}.csv`, visible.map(c => c.label), filtered.map(row => visible.map(c => cellText(c, row))));
   });
+
+  container.querySelector("#importBtn")?.addEventListener("click", () => openImportModal(afterChange));
 
   searchEl.addEventListener("input", drawBody);
   selects.forEach(sel => sel.addEventListener("change", drawBody));

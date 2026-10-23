@@ -46,7 +46,7 @@ app.get("/healthz", async (req, res) => {
 app.get(["/", "/index.html"], carregarUsuario, (req, res, next) => (req.user ? next() : res.redirect("/login.html")));
 app.get("/login.html", carregarUsuario, (req, res, next) => (req.user ? res.redirect("/") : next()));
 
-app.use("/api", express.json({ limit: "100kb" }), api);
+app.use("/api", express.json({ limit: "2mb" }), api);
 
 /* HTML, JS e CSS sempre revalidam (ETag → 304 barato): depois de um deploy o
    navegador não mistura HTML novo com script antigo. Fontes/imagens podem ficar em cache. */

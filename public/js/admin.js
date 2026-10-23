@@ -684,3 +684,52 @@ async function renderSettingsView(container){
     } finally { btn.disabled = false; }
   });
 }
+
+/* =========================================================
+   IMPORTAR COLABORADORES (CSV salvo pelo Excel)
+   ========================================================= */
+function openImportModal(onDone){
+  const form = App.openModal("Importar colaboradores", { wide: true });
+  form.innerHTML = `
+    <p class="modal-intro">No Excel, use <strong>Arquivo → Salvar como → CSV UTF-8</strong>. Colunas reconhecidas:
+      Nome, Matrícula, Login, E-mail, Setor/Lotação, Função, Ramal, Celular, Nascimento, Formação/Curso, Home Office e Situação da vaga.
+      Quem já existe (mesma matrícula, login ou e-mail) é <strong>atualizado</strong>; os demais são criados.</p>
+    <div class="form-grid">
+      <div class="field"><label for="impArq">Arquivo CSV <span class="req">*</span></label>
+        <input id="impArq" type="file" accept=".csv,text/csv" required></div>
+      <div class="field"><label for="impDom">Domínio de e-mail <span class="opt">(opcional)</span></label>
+        <input id="impDom" placeholder="ex.: stf.jus.br" value="stf.jus.br">
+        <small class="field-hint">Sem coluna de e-mail, ele vira login@domínio.</small></div>
+    </div>
+    <div class="import-preview" id="impPrev" hidden></div>
+    <p class="form-error" hidden></p>
+    <div class="modal-actions"><button type="submit" class="btn btn-primary modal-submit">Conferir</button></div>`;
+
+  let csv = null;
+  let conferido = false;
+  const prev = form.querySelector("#impPrev");
+  const btn = form.querySelector(".modal-submit");
+  const reset = () => { conferido = false; prev.hidden = true; btn.textContent = "Conferir"; };
+  form.querySelector("#impArq").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    csv = f ? await f.text() : null;
+    reset();
+  });
+  form.querySelector("#impDom").addEventListener("input", reset);
+
+  submitWith(form, async () => {
+    if (!csv) throw new Error("Escolha o arquivo CSV");
+    const body = { csv, dominio: form.querySelector("#impDom").value, simular: !conferido };
+    const r = await API.post("/admin/importar/colaboradores", body);
+    if (!conferido){
+      prev.innerHTML = `<strong>${r.linhas}</strong> linha(s) lida(s): <span class="badge ok">${r.criados} novo(s)</span> <span class="badge info">${r.atualizados} atualização(ões)</span>`;
+      prev.hidden = false;
+      conferido = true;
+      setTimeout(() => { btn.textContent = "Importar agora"; });
+      return;
+    }
+    App.closeModal();
+    toast(`Importação concluída: ${r.criados} novo(s), ${r.atualizados} atualizado(s)`);
+    onDone?.();
+  });
+}

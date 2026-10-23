@@ -174,6 +174,8 @@ npm run db:importar -- equipe.csv --dominio stf.jus.br --simular   # confere sem
 npm run db:importar -- equipe.csv --dominio stf.jus.br             # grava
 ```
 
+Ou, mais simples: na tela *Colaboradores*, botão **Importar planilha** (só administradores), que mostra quantos serão criados e atualizados antes de gravar.
+
 Cabeçalhos reconhecidos (com ou sem acento): Nome / Nome completo, Matrícula, Login, E-mail, Setor / Lotação, Função, Ramal, Celular / Tel. Celular, Nascimento / Dt. Nascimento, Formação / Curso, Home Office, Situação da vaga. Quem já existe (mesma matrícula, login ou e-mail) é atualizado; os demais são criados. `--dominio` monta o e-mail como `login@dominio` quando a planilha não tem e-mail. Para gravar no banco do Railway, use a `DATABASE_PUBLIC_URL` do serviço Postgres como `DATABASE_URL`.
 
 ## Migrando os dados da planilha da v1

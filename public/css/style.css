@@ -1344,3 +1344,5 @@ select.inline-search{ min-width:200px; }
   .settings{ grid-template-columns:1fr; }
   .pf-bar{ grid-template-columns:96px 1fr; }
 }
+
+.import-preview{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; color:var(--ink-soft); padding:12px; border-radius:10px; background:var(--surface-sunk); border:1px solid var(--border); }

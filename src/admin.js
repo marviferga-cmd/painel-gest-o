@@ -10,6 +10,7 @@ import { Router } from "express";
 import { prisma } from "./db.js";
 import { ValidationError } from "./lib/format.js";
 import { lerConfig, registrar, salvarConfig } from "./config.js";
+import { converter, importar, lerCSV } from "../prisma/importar-colaboradores.js";
 import {
   exigirAdmin, gerarLink, hashSenha, normEmail, sanitizarAcessos,
   TELAS, usuarioPublico, validaSenha,
@@ -246,4 +247,20 @@ adminApi.get("/atividades", async (req, res) => {
   res.json(itens.map((a) => ({
     id: a.id, acao: a.acao, tela: a.tela, descricao: a.descricao, quando: a.createdAt, usuario: a.usuario?.nome ?? "—",
   })));
+});
+
+/* ---------------- importação de colaboradores (CSV) ---------------- */
+adminApi.post("/importar/colaboradores", async (req, res) => {
+  const csv = String(req.body?.csv ?? "");
+  if (!csv.trim()) throw new ValidationError("Arquivo vazio");
+  const dominio = String(req.body?.dominio ?? "").trim().replace(/^@/, "") || null;
+  if (dominio && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(dominio)) throw new ValidationError("Domínio de e-mail inválido");
+  let colaboradores;
+  try { colaboradores = converter(lerCSV(csv), { dominio }); }
+  catch (err) { throw new ValidationError(err.message); }
+  if (!colaboradores.length) throw new ValidationError("Nenhuma linha com nome encontrada");
+  const simular = req.body?.simular === true;
+  const r = await importar(prisma, colaboradores, { simular });
+  if (!simular) registrar(req, "admin", "colaboradores", `Importou planilha: ${r.criados} novo(s), ${r.atualizados} atualizado(s)`);
+  res.json({ linhas: colaboradores.length, ...r, simulado: simular });
 });
