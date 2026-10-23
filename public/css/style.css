@@ -1346,3 +1346,6 @@ select.inline-search{ min-width:200px; }
 }
 
 .import-preview{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; color:var(--ink-soft); padding:12px; border-radius:10px; background:var(--surface-sunk); border:1px solid var(--border); }
+
+/* textos longos quebram linha em vez de alargar a tabela */
+table.data-table td.td-text{ white-space:normal; min-width:210px; max-width:360px; line-height:1.4; }

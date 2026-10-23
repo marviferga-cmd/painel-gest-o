@@ -102,6 +102,8 @@ async function renderTableView(container, item){
   const visible = item.columns.filter(c => c.table);
   const statusCol = visible.find(c => c.key === "status") || visible.find(c => c.type === "status" || c.type === "bool");
   const filterCols = detectFilterColumns(rows, visible);
+  // colunas de texto com valores longos quebram linha em vez de alargar a tabela
+  const longCols = new Set(visible.filter(c => c.type === "text" && rows.some(r => String(cellText(c, r)).length > 32)).map(c => c.key));
   const editable = !item.readOnly && item.nivel !== "ver";
   let filtered = rows;
 
@@ -164,7 +166,7 @@ async function renderTableView(container, item){
     tbody.innerHTML = filtered.length
       ? filtered.map(row => `
           <tr>
-            ${visible.map(c => `<td>${cellHTML(c, row)}</td>`).join("")}
+            ${visible.map(c => `<td${longCols.has(c.key) ? ` class="td-text"` : ""}>${cellHTML(c, row)}</td>`).join("")}
             ${editable ? `<td><div class="row-actions"><button class="icon-btn" data-edit="${row.id}">Editar</button></div></td>` : ""}
           </tr>`).join("")
       : `<tr><td colspan="${visible.length + 1}"><div class="empty-state">Nenhum registro encontrado.</div></td></tr>`;

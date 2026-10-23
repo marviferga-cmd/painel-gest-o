@@ -36,9 +36,10 @@ function fmtMoney(n){
 /* Classifica um texto de status em ok | warn | bad | info | neutral (cor do badge). */
 function classifyStatus(text){
   const t = String(text || "").toLowerCase();
+  if (/^abaixo do mínimo/.test(t)) return "warn";
   if (/(atras|crítico|critico|cancelad|vencid|negativo|inativo|baixad|reprovad|desist|suspens)/.test(t)) return "bad";
   if (/(risco|atenção|atencao|pendente|renovaç|manutenç|ocupado|afastad|férias|vence hoje)/.test(t)) return "warn";
-  if (/(conclu|aprovad|pago|emitida|ativo|no prazo|positivo|dispon|admiss|em uso|devolvid|a vencer|encerrad)/.test(t)) return "ok";
+  if (/(conclu|completa|aprovad|pago|emitida|ativo|no prazo|positivo|dispon|admiss|em uso|devolvid|a vencer|encerrad)/.test(t)) return "ok";
   if (/(andamento|execuç|aberto|aberta|triagem|entrevista|document)/.test(t)) return "info";
   return "neutral";
 }

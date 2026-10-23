@@ -116,18 +116,30 @@ export const MODULES = [
   },
   {
     key: "cargos-salarios", group: "pessoas", label: "Cargos e Salários", icon: "coins", accent: "green",
-    desc: "Base de cargos: nível, salário-base e quantitativo de ocupação (calculado).",
+    desc: "Cargos do contrato: serviço, CBO, equipe mínima, salário-base e cobertura (calculada).",
     type: "table", model: "cargo",
     include: { _count: { select: { colaboradores: { where: { ativo: true } } } } },
-    orderBy: [{ nome: "asc" }, { nivel: "asc" }],
+    orderBy: [{ servico: { sort: "asc", nulls: "last" } }, { salarioBase: "asc" }, { nome: "asc" }],
     columns: [
       { key: "nome", label: "Cargo", type: "text", required: true },
-      { key: "nivel", label: "Nível", type: "status",
-        options: ["Júnior", "Pleno", "Sênior", "Coordenação", "Gerência"], required: true },
-      { key: "salarioBase", label: "Salário base", type: "money", required: true },
-      { key: "ativos", label: "Colaboradores ativos", type: "number", compute: (r) => r._count?.colaboradores ?? 0 },
+      { key: "servico", label: "Serviço", type: "text", filter: true },
+      { key: "nivel", label: "Nível", type: "status", required: true,
+        options: ["Atendimento", "1º nível", "2º nível", "3º nível", "Técnico", "Analista",
+          "Júnior", "Pleno", "Sênior", "Supervisão", "Coordenação", "Gerência"] },
+      { key: "cbo", label: "CBO", type: "text" },
+      { key: "equipeMinima", label: "Equipe mínima", type: "number" },
+      { key: "salarioBase", label: "Salário base (piso)", type: "money", required: true },
+      { key: "ativos", label: "Ocupados", type: "number", compute: (r) => r._count?.colaboradores ?? 0 },
+      { key: "cobertura", label: "Cobertura", type: "status", compute: (r) => {
+        if (!r.equipeMinima) return "—";
+        const falta = r.equipeMinima - (r._count?.colaboradores ?? 0);
+        return falta > 0 ? `Abaixo do mínimo (faltam ${falta})` : "Completa";
+      } },
       { key: "ativo", label: "Status", type: "bool" },
     ],
+    validate(d) {
+      if (d.equipeMinima !== undefined && d.equipeMinima !== null && d.equipeMinima < 0) throw new ValidationError("Equipe mínima não pode ser negativa");
+    },
   },
   {
     key: "equipamentos", group: "pessoas", label: "Equipamentos", icon: "laptop", accent: "violet",

@@ -45,9 +45,12 @@ model Cliente {
 
 model Cargo {
   id          Int      @id @default(autoincrement())
-  nome        String
-  nivel       String
-  salarioBase Decimal  @map("salario_base") @db.Decimal(12, 2)
+  nome         String
+  nivel        String
+  servico      String? // serviço do contrato a que o cargo pertence
+  cbo          String? // Classificação Brasileira de Ocupações (ex.: 3172-10)
+  equipeMinima Int?    @map("equipe_minima") // quantidade mínima exigida no contrato
+  salarioBase  Decimal @map("salario_base") @db.Decimal(12, 2)
   ativo       Boolean  @default(true)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
