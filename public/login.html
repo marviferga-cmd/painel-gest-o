@@ -15,16 +15,33 @@
 <body class="auth-body">
 
 <main class="auth-wrap">
-  <div class="auth-card">
+  <section class="auth-hero" aria-hidden="true">
     <div class="auth-brand">
-      <span class="brand-mark">GP</span>
+      <span class="brand-mark" data-brand-mark>GP</span>
       <div class="brand-text">
-        <strong>Painel de Gestão</strong>
-        <span>operação &amp; serviços</span>
+        <strong data-brand-name>Painel de Gestão</strong>
+        <span data-brand-sub>operação &amp; serviços</span>
       </div>
     </div>
+    <h2>Pessoas, ordens de serviço e SLA no mesmo lugar.</h2>
+    <ul class="auth-points">
+      <li><span>✓</span>Cada pessoa vê só as telas liberadas para ela</li>
+      <li><span>✓</span>Prazos e riscos de SLA calculados automaticamente</li>
+      <li><span>✓</span>Histórico de quem alterou cada registro</li>
+    </ul>
+  </section>
 
-    <div class="auth-tabs" role="tablist">
+  <div class="auth-card">
+    <div class="auth-brand auth-brand-mobile">
+      <span class="brand-mark" data-brand-mark>GP</span>
+      <div class="brand-text">
+        <strong data-brand-name>Painel de Gestão</strong>
+        <span data-brand-sub>operação &amp; serviços</span>
+      </div>
+    </div>
+    <h1 class="auth-title">Entrar</h1>
+
+    <div class="auth-tabs" role="tablist" id="authTabs">
       <button type="button" role="tab" class="auth-tab active" data-tab="login" aria-selected="true">Entrar</button>
       <button type="button" role="tab" class="auth-tab" data-tab="cadastro" aria-selected="false">Criar conta</button>
     </div>
@@ -40,6 +57,7 @@
       </div>
       <p class="form-error" hidden></p>
       <button type="submit" class="btn btn-primary auth-submit">Entrar</button>
+      <p class="auth-note" id="conviteNote" hidden>Ainda não tem acesso? Peça um convite ao administrador do painel.</p>
     </form>
 
     <form id="cadastroForm" class="auth-form" novalidate hidden>

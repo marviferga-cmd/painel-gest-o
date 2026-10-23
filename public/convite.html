@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
+<title>Ativar acesso · Painel de Gestão</title>
+<meta name="theme-color" content="#090E1A">
+<script src="js/theme-init.js"></script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235B7CFA'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='13' font-weight='700' text-anchor='middle' fill='%230B1220'%3EGP%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-body">
+
+<main class="auth-wrap auth-wrap-single">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="brand-mark" id="brandMark">GP</span>
+      <div class="brand-text">
+        <strong id="brandName">Painel de Gestão</strong>
+        <span id="brandSub">operação &amp; serviços</span>
+      </div>
+    </div>
+
+    <div id="conviteLoading" class="empty-state loading-state">Validando link…</div>
+
+    <div id="conviteInvalido" class="auth-done" hidden>
+      <h2>Link inválido ou expirado</h2>
+      <p id="conviteErro">Este link já foi usado ou passou da validade. Peça um novo ao administrador do painel.</p>
+      <a class="btn" href="/login.html">Ir para o login</a>
+    </div>
+
+    <form id="conviteForm" class="auth-form" novalidate hidden>
+      <div class="auth-welcome">
+        <h1 class="auth-title" id="conviteTitulo">Bem-vindo(a)!</h1>
+        <p id="conviteTexto"></p>
+      </div>
+      <div class="field">
+        <label for="cvEmail">E-mail de acesso</label>
+        <input id="cvEmail" type="email" autocomplete="username" readonly>
+      </div>
+      <div class="field">
+        <label for="cvSenha">Crie uma senha</label>
+        <input id="cvSenha" name="senha" type="password" autocomplete="new-password" minlength="8" required>
+        <small class="field-hint">Mínimo de 8 caracteres.</small>
+      </div>
+      <div class="field">
+        <label for="cvSenha2">Confirme a senha</label>
+        <input id="cvSenha2" name="senha2" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <p class="form-error" hidden></p>
+      <button type="submit" class="btn btn-primary auth-submit">Ativar acesso</button>
+    </form>
+  </div>
+</main>
+
+<script src="js/convite.js"></script>
+</body>
+</html>

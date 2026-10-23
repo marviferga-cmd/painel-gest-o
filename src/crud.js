@@ -85,44 +85,27 @@ async function fetchOne(prisma, mod, id) {
   return rec;
 }
 
-/* Histórico (tabela auditoria): guarda a linha como a tela mostra, antes e depois.
-   Falhar aqui não desfaz a gravação, só fica registrado no log. */
-async function auditar(prisma, user, mod, acao, registroId, antes, depois) {
-  if (!user) return;
-  try {
-    await prisma.auditoria.create({
-      data: { usuarioId: user.id, usuarioNome: user.nome, modulo: mod.key, registroId, acao, antes: antes ?? undefined, depois: depois ?? undefined },
-    });
-  } catch (err) {
-    console.error("Falha ao registrar auditoria:", err);
-  }
-}
-
-export async function createRow(prisma, mod, body, user) {
+export async function createRow(prisma, mod, body) {
   const data = fromInput(mod, body);
   mod.validate?.(data);
   await mod.beforeSave?.(data, prisma, null);
   const rec = await prisma[mod.model].create({ data, include: mod.include });
-  const row = toRow(mod, rec);
-  await auditar(prisma, user, mod, "criou", rec.id, null, row);
-  return row;
+  return toRow(mod, rec);
 }
 
-export async function updateRow(prisma, mod, id, body, user) {
+export async function updateRow(prisma, mod, id, body) {
   const existing = await fetchOne(prisma, mod, id);
   const data = fromInput(mod, body, { partial: true });
   mod.validate?.({ ...existing, ...data });
   await mod.beforeSave?.(data, prisma, existing);
   const rec = await prisma[mod.model].update({ where: { id }, data, include: mod.include });
-  const row = toRow(mod, rec);
-  await auditar(prisma, user, mod, "alterou", id, toRow(mod, existing), row);
-  return row;
+  return toRow(mod, rec);
 }
 
-export async function deleteRow(prisma, mod, id, user) {
-  const existing = await fetchOne(prisma, mod, id);
+export async function deleteRow(prisma, mod, id) {
+  const rec = await fetchOne(prisma, mod, id);
   await prisma[mod.model].delete({ where: { id } });
-  await auditar(prisma, user, mod, "excluiu", id, toRow(mod, existing), null);
+  return toRow(mod, rec);
 }
 
 /* ---------- listas para os <select> de chaves estrangeiras ---------- */

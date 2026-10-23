@@ -51,19 +51,17 @@ for (const l of ["colaboradores", "clientes", "servicos", "cargos", "ordens", "f
 const de = new Date(Date.now() - 30 * 86400e3).toISOString();
 const ate = new Date(Date.now() + 30 * 86400e3).toISOString();
 await a.expect(200, "GET", `/api/eventos?de=${encodeURIComponent(de)}&ate=${encodeURIComponent(ate)}`);
-await a.expect(200, "GET", "/api/usuarios");
+for (const r of ["usuarios", "perfis", "config", "atividades"]) await a.expect(200, "GET", `/api/admin/${r}`);
 
 /* ---------- CRUD + histórico ---------- */
 const nome = `Cliente smoke ${Date.now()}`;
 const criado = await a.expect(201, "POST", "/api/modules/clientes", { nome, documento: "", contato: "" });
 await a.expect(200, "PUT", `/api/modules/clientes/${criado.id}`, { nome, documento: "00.000.000/0001-00", contato: "" });
 await a.expect(204, "DELETE", `/api/modules/clientes/${criado.id}`);
-const hist = await a.expect(200, "GET", "/api/auditoria?modulo=clientes&limite=10");
-const doRegistro = hist.filter((h) => h.registroId === criado.id).map((h) => h.acao);
+await new Promise((r) => setTimeout(r, 500)); // o histórico é gravado sem bloquear a resposta
+const hist = await a.expect(200, "GET", "/api/admin/atividades?tela=clientes");
+const doRegistro = hist.filter((h) => h.descricao.includes(nome)).map((h) => h.acao);
 assert.deepEqual(doRegistro, ["excluiu", "alterou", "criou"], "histórico do cliente incompleto");
-const alterou = hist.find((h) => h.registroId === criado.id && h.acao === "alterou");
-assert.equal(alterou.antes.documento, null);
-assert.equal(alterou.depois.documento, "00.000.000/0001-00");
 
 /* ---------- OS concluída mantém a data de conclusão ao reeditar ---------- */
 const os = await a.expect(200, "GET", "/api/modules/controle-os");

@@ -1,6 +1,6 @@
 {
   "name": "painel-gestao",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Painel de Gestão — Pessoas, Ordens de Serviço e SLA (Express + Prisma + PostgreSQL)",
   "private": true,
   "type": "module",
@@ -16,6 +16,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "node --env-file-if-exists=.env prisma/seed.js",
+    "db:importar": "node --env-file-if-exists=.env prisma/importar-colaboradores.js",
     "db:studio": "prisma studio",
     "check": "node scripts/check.js",
     "test": "node --test",

@@ -40,10 +40,19 @@ export const MODULES = [
     orderBy: [{ ativo: "desc" }, { nome: "asc" }],
     columns: [
       { key: "nome", label: "Nome", type: "text", required: true },
+      { key: "matricula", label: "Matrícula", type: "text" },
+      { key: "login", label: "Login", type: "text" },
       { key: "email", label: "E-mail", type: "text", table: false },
-      { key: "cargoId", label: "Cargo", type: "ref", ref: "cargos",
+      { key: "setor", label: "Setor", type: "text", filter: true, hint: "Lotação (ex.: CRCS/SERVICE DESK)." },
+      { key: "funcao", label: "Função", type: "text", filter: true },
+      { key: "cargoId", label: "Cargo", type: "ref", ref: "cargos", table: false,
         label_of: (r) => (r.cargo ? `${r.cargo.nome} — ${r.cargo.nivel}` : null) },
-      { key: "funcao", label: "Função", type: "text" },
+      { key: "ramal", label: "Ramal", type: "text" },
+      { key: "celular", label: "Celular", type: "text", table: false },
+      { key: "nascimento", label: "Nascimento", type: "date", table: false },
+      { key: "formacao", label: "Formação", type: "text", table: false },
+      { key: "homeOffice", label: "Home office", type: "status", options: ["Sim", "Não"], table: false },
+      { key: "situacaoVaga", label: "Situação da vaga", type: "text", table: false },
       { key: "disponibilidade", label: "Disponibilidade", type: "status",
         options: ["Disponível", "Ocupado", "Férias", "Afastado"] },
       { key: "ativo", label: "Situação", type: "bool" },
@@ -107,18 +116,30 @@ export const MODULES = [
   },
   {
     key: "cargos-salarios", group: "pessoas", label: "Cargos e Salários", icon: "coins", accent: "green",
-    desc: "Base de cargos: nível, salário-base e quantitativo de ocupação (calculado).",
+    desc: "Cargos do contrato: serviço, CBO, equipe mínima, salário-base e cobertura (calculada).",
     type: "table", model: "cargo",
     include: { _count: { select: { colaboradores: { where: { ativo: true } } } } },
-    orderBy: [{ nome: "asc" }, { nivel: "asc" }],
+    orderBy: [{ servico: { sort: "asc", nulls: "last" } }, { salarioBase: "asc" }, { nome: "asc" }],
     columns: [
       { key: "nome", label: "Cargo", type: "text", required: true },
-      { key: "nivel", label: "Nível", type: "status",
-        options: ["Júnior", "Pleno", "Sênior", "Coordenação", "Gerência"], required: true },
-      { key: "salarioBase", label: "Salário base", type: "money", required: true },
-      { key: "ativos", label: "Colaboradores ativos", type: "number", compute: (r) => r._count?.colaboradores ?? 0 },
+      { key: "servico", label: "Serviço", type: "text", filter: true },
+      { key: "nivel", label: "Nível", type: "status", required: true,
+        options: ["Atendimento", "1º nível", "2º nível", "3º nível", "Técnico", "Analista",
+          "Júnior", "Pleno", "Sênior", "Supervisão", "Coordenação", "Gerência"] },
+      { key: "cbo", label: "CBO", type: "text" },
+      { key: "equipeMinima", label: "Equipe mínima", type: "number" },
+      { key: "salarioBase", label: "Salário base (piso)", type: "money", required: true },
+      { key: "ativos", label: "Ocupados", type: "number", compute: (r) => r._count?.colaboradores ?? 0 },
+      { key: "cobertura", label: "Cobertura", type: "status", compute: (r) => {
+        if (!r.equipeMinima) return "—";
+        const falta = r.equipeMinima - (r._count?.colaboradores ?? 0);
+        return falta > 0 ? `Abaixo do mínimo (faltam ${falta})` : "Completa";
+      } },
       { key: "ativo", label: "Status", type: "bool" },
     ],
+    validate(d) {
+      if (d.equipeMinima !== undefined && d.equipeMinima !== null && d.equipeMinima < 0) throw new ValidationError("Equipe mínima não pode ser negativa");
+    },
   },
   {
     key: "equipamentos", group: "pessoas", label: "Equipamentos", icon: "laptop", accent: "violet",
@@ -408,7 +429,7 @@ export function publicMeta() {
         columns: m.columns?.map((c) => ({
           key: c.key, label: c.label, type: c.type,
           required: !!c.required, options: c.options, ref: c.ref, hint: c.hint,
-          computed: !!c.compute || !!m.readOnly, table: c.table !== false,
+          computed: !!c.compute || !!m.readOnly, table: c.table !== false, filter: !!c.filter,
         })),
       })),
     })),

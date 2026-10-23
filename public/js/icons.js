@@ -22,6 +22,14 @@ const ICONS = {
   catalog: `<rect x="3" y="3" width="14" height="14" rx="2"/><path d="M3 8h14M8 8v9"/>`,
   calendar: `<rect x="3" y="4" width="14" height="13" rx="2"/><path d="M3 8.5h14M7 2.5v3M13 2.5v3"/><circle cx="7.3" cy="12" r=".8"/><circle cx="10.3" cy="12" r=".8"/><circle cx="13.3" cy="12" r=".8"/>`,
   home: `<path d="M3 9.5L10 3l7 6.5"/><path d="M5 8.5V17h10V8.5"/><path d="M8 17v-4.5h4V17"/>`,
+  shield: `<path d="M10 2.5l6 2.3v4.6c0 3.8-2.6 6.6-6 8.1-3.4-1.5-6-4.3-6-8.1V4.8l6-2.3z"/><path d="M7.5 10l1.8 1.8L13 8"/>`,
+  history: `<path d="M3.5 10a6.5 6.5 0 106.5-6.5c-2.2 0-4.1 1.1-5.3 2.7"/><path d="M4.5 2.8v3.5H8"/><path d="M10 6.5V10l2.5 1.6"/>`,
+  gear: `<circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/>`,
+  link: `<path d="M8.5 11.5a3 3 0 004.2 0l2.6-2.6a3 3 0 00-4.2-4.2l-1 1"/><path d="M11.5 8.5a3 3 0 00-4.2 0l-2.6 2.6a3 3 0 004.2 4.2l1-1"/>`,
+  upload: `<path d="M10 13V3.5M6 7l4-4 4 4"/><path d="M3.5 14.5v2h13v-2"/>`,
+  download: `<path d="M10 3v9.5M6 9l4 4 4-4"/><path d="M3.5 14.5v2h13v-2"/>`,
+  eye: `<path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10z"/><circle cx="10" cy="10" r="2.4"/>`,
+  mail: `<rect x="2.5" y="4.5" width="15" height="11" rx="2"/><path d="M3 5.5l7 5.5 7-5.5"/>`,
 };
 
 function iconSVG(name, extraClass){

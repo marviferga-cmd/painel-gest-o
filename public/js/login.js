@@ -11,12 +11,29 @@
       t.classList.toggle("active", on);
       t.setAttribute("aria-selected", String(on));
     });
+    document.querySelector(".auth-title").textContent = name === "login" ? "Entrar" : "Criar conta";
     loginForm.hidden = name !== "login";
     cadastroForm.hidden = name !== "cadastro";
     cadastroOk.hidden = true;
     (name === "login" ? loginForm : cadastroForm).querySelector("input").focus();
   }
   tabs.forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
+
+  /* nome, cor e cadastro público vêm das configurações do painel */
+  fetch("/api/auth/config").then(r => r.ok ? r.json() : null).then(cfg => {
+    if (!cfg) return;
+    document.querySelectorAll("[data-brand-name]").forEach(el => el.textContent = cfg.nomePainel);
+    document.querySelectorAll("[data-brand-sub]").forEach(el => el.textContent = cfg.subtitulo || "");
+    const sigla = cfg.nomePainel.trim().split(/\s+/).filter(p => !/^(da|de|do|das|dos|e|&)$/i.test(p)).slice(0, 2).map(p => p[0]).join("").toUpperCase();
+    document.querySelectorAll("[data-brand-mark]").forEach(el => el.textContent = sigla || "?");
+    document.title = `Entrar · ${cfg.nomePainel}`;
+    document.documentElement.dataset.accent = cfg.corDestaque;
+    try { localStorage.setItem("accent", cfg.corDestaque); } catch {}
+    if (!cfg.cadastroAberto){
+      document.getElementById("authTabs").hidden = true;
+      document.getElementById("conviteNote").hidden = false;
+    }
+  }).catch(() => {});
   document.getElementById("voltarLogin").addEventListener("click", () => showTab("login"));
 
   async function post(path, body){

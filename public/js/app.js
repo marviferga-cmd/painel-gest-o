@@ -14,6 +14,7 @@ const App = {
       return;
     }
     document.getElementById("resetData").hidden = !this.meta.allowReset;
+    this.applyBranding(this.meta.config);
     this.renderUser();
     this.buildNav();
     const initial = decodeURIComponent(location.hash.slice(1)) || "home";
@@ -68,14 +69,29 @@ const App = {
     el.closest(".nav-item").classList.toggle("risk", n > 0);
   },
 
+  /* nome, subtítulo e cor definidos em Administração → Configurações */
+  applyBranding(config){
+    if (!config) return;
+    this.meta.config = config;
+    document.getElementById("brandName").textContent = config.nomePainel;
+    document.getElementById("brandSub").textContent = config.subtitulo || "";
+    document.getElementById("brandMark").textContent = initials(config.nomePainel);
+    document.documentElement.dataset.accent = config.corDestaque;
+    try { localStorage.setItem("accent", config.corDestaque); } catch {}
+  },
+
+  get brand(){ return this.meta?.config?.nomePainel || "Painel de Gestão"; },
+
   renderUser(){
     const u = this.meta.user;
     if (!u) return;
     const partes = u.nome.trim().split(/\s+/);
-    document.getElementById("userAvatar").textContent = partes.slice(0, 2).map(p => p[0]).join("").toUpperCase() || "?";
+    document.getElementById("userAvatar").textContent = initials(u.nome);
     document.getElementById("userName").textContent = partes[0];
     document.getElementById("userPopName").textContent = u.nome;
     document.getElementById("userPopEmail").textContent = u.email;
+    document.getElementById("userPopRole").textContent =
+      u.papel === "admin" ? "Administrador" : u.perfil ? `Perfil: ${u.perfil}` : "Acesso personalizado";
     document.getElementById("userMenu").hidden = false;
   },
 
@@ -101,10 +117,14 @@ const App = {
     document.body.classList.remove("nav-open");
 
     const content = document.getElementById("content");
+    const pill = document.getElementById("accessPill");
+    pill.hidden = true;
+    // desfaz a prévia de cor não salva da tela de Configurações
+    if (this.meta.config) document.documentElement.dataset.accent = this.meta.config.corDestaque;
     if (key === "home"){
       document.getElementById("viewGroup").textContent = "início";
       document.getElementById("viewTitle").textContent = "Painéis";
-      document.title = "Painel de Gestão";
+      document.title = this.brand;
       content.className = "content content-home";
       renderHomeView(content, this.meta);
       return;
@@ -115,7 +135,8 @@ const App = {
     content.className = "content";
     document.getElementById("viewGroup").textContent = found.group.label;
     document.getElementById("viewTitle").textContent = found.item.label;
-    document.title = `${found.item.label} · Painel de Gestão`;
+    document.title = `${found.item.label} · ${this.brand}`;
+    pill.hidden = !isConsulta(found.item);
     await renderModule(content, found.item);
   },
 
@@ -125,11 +146,25 @@ const App = {
   },
 
   /* ---------------- MODAL DE FORMULÁRIO ---------------- */
-  async openFormModal({ title, fields, onSubmit, initialValues, onDelete }){
+  /* abre o modal vazio e devolve o <form> para quem for preenchê-lo */
+  openModal(title, { wide = false } = {}){
     const form = document.getElementById("modalForm");
     document.getElementById("modalTitle").textContent = title;
+    document.querySelector("#modalBackdrop .modal").classList.toggle("modal-wide", wide);
+    form.onsubmit = null;
+    form.innerHTML = "";
+    const backdrop = document.getElementById("modalBackdrop");
+    if (!backdrop.classList.contains("open")) this.lastFocus = document.activeElement;
+    this.dirtyCheck = null;
+    backdrop.classList.add("open");
+    return form;
+  },
+
+  async openFormModal({ title, fields, onSubmit, initialValues, onDelete }){
+    // formulários longos (ex.: Colaboradores) usam duas colunas
+    const grid = fields.length > 8;
+    const form = this.openModal(title, { wide: grid });
     form.innerHTML = loadingHTML("Carregando formulário…");
-    this.openModal();
 
     // carrega as listas das chaves estrangeiras antes de montar o formulário
     const lookups = {};
@@ -141,7 +176,8 @@ const App = {
     }
 
     const init = initialValues || {};
-    form.innerHTML = fields.map(f => this.fieldHTML(f, init[f.key], lookups, init)).join("")
+    const campos = fields.map(f => this.fieldHTML(f, init[f.key], lookups, init)).join("");
+    form.innerHTML = (grid ? `<div class="form-grid">${campos}</div>` : campos)
       + `<p class="form-error" id="formError" hidden></p>`
       + `<div class="modal-actions">`
       + (onDelete ? `<button type="button" class="modal-delete" id="modalDeleteBtn">Excluir</button>` : "")
@@ -258,17 +294,9 @@ const App = {
     document.querySelector('meta[name="theme-color"]').setAttribute("content", light ? "#F4F6FB" : "#090E1A");
   },
 
-  /* ---------------- MODAL ---------------- */
   dirtyCheck: null,
   lastFocus: null,
   confirmResolve: null,
-
-  openModal(){
-    const backdrop = document.getElementById("modalBackdrop");
-    if (!backdrop.classList.contains("open")) this.lastFocus = document.activeElement;
-    this.dirtyCheck = null;
-    backdrop.classList.add("open");
-  },
 
   closeModal(){
     this.dirtyCheck = null;

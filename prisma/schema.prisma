@@ -45,9 +45,12 @@ model Cliente {
 
 model Cargo {
   id          Int      @id @default(autoincrement())
-  nome        String
-  nivel       String
-  salarioBase Decimal  @map("salario_base") @db.Decimal(12, 2)
+  nome         String
+  nivel        String
+  servico      String? // serviço do contrato a que o cargo pertence
+  cbo          String? // Classificação Brasileira de Ocupações (ex.: 3172-10)
+  equipeMinima Int?    @map("equipe_minima") // quantidade mínima exigida no contrato
+  salarioBase  Decimal @map("salario_base") @db.Decimal(12, 2)
   ativo       Boolean  @default(true)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -62,8 +65,17 @@ model Colaborador {
   id              Int      @id @default(autoincrement())
   nome            String
   email           String?  @unique
+  matricula       String?  @unique
+  login           String?  @unique // login de rede
   cargoId         Int?     @map("cargo_id")
   funcao          String?
+  setor           String? // lotação
+  ramal           String?
+  celular         String?
+  nascimento      DateTime? @db.Date
+  formacao        String? // curso / formação acadêmica
+  homeOffice      String?  @map("home_office") // Sim | Não
+  situacaoVaga    String?  @map("situacao_vaga")
   disponibilidade String   @default("Disponível")
   ativo           Boolean  @default(true)
   createdAt       DateTime @default(now()) @map("created_at")
@@ -76,6 +88,7 @@ model Colaborador {
   equipamentos Equipamento[]
   ordens       OrdemServico[]
   chamados     Chamado[]
+  usuario      Usuario? // conta de acesso ao painel, se houver
 
   @@index([nome])
   @@index([cargoId])
@@ -340,21 +353,45 @@ model Evento {
 // ---------------------------------------------------------------
 
 model Usuario {
-  id           Int       @id @default(autoincrement())
-  nome         String
-  email        String    @unique // sempre minúsculo
-  senhaHash    String    @map("senha_hash") // scrypt: salt:hash (hex)
-  papel        String    @default("usuario") // admin | usuario
-  status       String    @default("pendente") // pendente | ativo | bloqueado
-  permissoes   String[]  @default([]) // chaves das telas restritas liberadas
-  ultimoAcesso DateTime? @map("ultimo_acesso")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  id            Int       @id @default(autoincrement())
+  nome          String
+  email         String    @unique // sempre minúsculo
+  senhaHash     String    @map("senha_hash") // scrypt: salt:hash (hex)
+  papel         String    @default("usuario") // admin | usuario
+  status        String    @default("pendente") // convidado | pendente | ativo | bloqueado
+  // Acesso por tela: se tiver perfil, vale o do perfil; senão, vale `acessos`.
+  // Formato: { "chave-da-tela": "ver" | "editar" } (tela ausente = sem acesso)
+  perfilId      Int?      @map("perfil_id")
+  acessos       Json      @default("{}")
+  colaboradorId Int?      @unique @map("colaborador_id")
+  // Link de convite / redefinição de senha: só o SHA-256 do token fica no banco
+  conviteHash   String?   @unique @map("convite_hash")
+  conviteExpira DateTime? @map("convite_expira")
+  ultimoAcesso  DateTime? @map("ultimo_acesso")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  sessoes    Sessao[]
-  auditorias Auditoria[]
+  perfil      Perfil?      @relation(fields: [perfilId], references: [id], onDelete: SetNull)
+  colaborador Colaborador? @relation(fields: [colaboradorId], references: [id], onDelete: SetNull)
+  sessoes     Sessao[]
+  atividades  Atividade[]
 
+  @@index([perfilId])
   @@map("usuarios")
+}
+
+// Modelo de acesso reutilizável (ex.: "RH", "Financeiro").
+model Perfil {
+  id        Int      @id @default(autoincrement())
+  nome      String   @unique
+  descricao String?
+  acessos   Json     @default("{}") // mesmo formato de Usuario.acessos
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  usuarios Usuario[]
+
+  @@map("perfis")
 }
 
 model Sessao {
@@ -370,43 +407,35 @@ model Sessao {
   @@map("sessoes")
 }
 
-// Telas que só usuários com permissão explícita (ou admins) podem abrir.
-model TelaRestrita {
-  chave String @id // chave do módulo (src/modules.js)
+// Configurações gerais editáveis pelo admin (nome do painel, cor, cadastro público…).
+model Configuracao {
+  chave String @id
+  valor Json
 
-  @@map("telas_restritas")
+  @@map("configuracoes")
 }
 
-// Limite de tentativas de login/cadastro por IP (no banco: vale entre reinícios e instâncias).
+// Histórico de quem criou/alterou/excluiu o quê.
+model Atividade {
+  id        Int      @id @default(autoincrement())
+  usuarioId Int?     @map("usuario_id")
+  acao      String // criou | alterou | excluiu | moveu | admin
+  tela      String? // chave do módulo
+  descricao String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("atividades")
+}
+
+// Limite de tentativas de login/cadastro/convite por IP (no banco: vale entre reinícios e instâncias).
 model LimiteTentativa {
-  chave String   @id // "login|<ip>" ou "cadastro|<ip>"
+  chave String   @id // "<rota>|<ip>"
   n     Int
   ate   DateTime // fim da janela atual
 
   @@index([ate])
   @@map("limite_tentativas")
-}
-
-// ---------------------------------------------------------------
-// HISTÓRICO DE ALTERAÇÕES
-// ---------------------------------------------------------------
-
-// Quem criou/alterou/excluiu cada registro das telas de cadastro.
-// antes/depois guardam a linha como a tabela mostra (com os nomes já resolvidos).
-model Auditoria {
-  id          Int      @id @default(autoincrement())
-  usuarioId   Int?     @map("usuario_id")
-  usuarioNome String   @map("usuario_nome") // mantido mesmo se a conta for excluída
-  modulo      String // chave do módulo (src/modules.js)
-  registroId  Int      @map("registro_id")
-  acao        String // criou | alterou | excluiu
-  antes       Json?
-  depois      Json?
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
-
-  @@index([modulo, registroId])
-  @@index([createdAt])
-  @@map("auditoria")
 }
