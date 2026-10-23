@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: painel
+          POSTGRES_PASSWORD: painel
+          POSTGRES_DB: painel
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U painel -d painel"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://painel:painel@localhost:5432/painel?schema=public
+      ADMIN_EMAIL: ci@example.com
+      ADMIN_PASSWORD: ci-senha-123
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - name: Sintaxe
+        run: npm run check
+      - name: Testes unitários
+        run: npm test
+
+      - name: Migrações aplicam num banco vazio
+        run: npx prisma migrate deploy
+      - name: Migrações batem com o schema.prisma
+        run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+      - name: Dados de exemplo
+        run: npm run db:seed
+
+      - name: Smoke test da API
+        run: |
+          node src/server.js > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3000/healthz > /dev/null && break; sleep 1; done
+          node scripts/smoke.js
+      - name: Log do servidor
+        if: always()
+        run: cat server.log || true

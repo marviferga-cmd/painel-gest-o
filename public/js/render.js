@@ -78,6 +78,40 @@ function buildKpiRow(rows, statusCol){
   return `<div class="kpi-row">${tiles.join("")}</div>`;
 }
 
+/* Valor usado para ordenar: números e datas pelo valor, o resto pelo texto exibido. null vai para o fim. */
+function sortValue(col, row){
+  const v = row[col.key];
+  switch (col.type){
+    case "number":
+    case "money": return v === null || v === undefined || v === "" ? null : Number(v);
+    case "date":
+    case "datetime":
+    case "month": return v || null;
+    case "hours": {
+      const m = /^([+-])?(\d+)h(\d{2})$/.exec(String(v ?? ""));
+      return m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : null;
+    }
+    default: {
+      const t = cellText(col, row);
+      return t === "—" || t === null ? null : String(t);
+    }
+  }
+}
+
+function compareSortValues(a, b){
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b), "pt-BR", { numeric: true, sensitivity: "base" });
+}
+
+/* Texto da célula no CSV: dinheiro como número com vírgula (o Excel soma), vazio em vez de "—". */
+function csvValue(col, row){
+  const v = row[col.key];
+  if (col.type === "money") return v === null || v === undefined ? "" : Number(v).toFixed(2).replace(".", ",");
+  if (col.type === "number") return v ?? "";
+  const t = cellText(col, row);
+  return t === "—" ? "" : t;
+}
+
 function detectFilterColumns(rows, columns){
   return columns
     .filter(c => ["status","bool","ref"].includes(c.type))
@@ -123,13 +157,16 @@ async function renderTableView(container, item){
           <h2>${esc(item.label)}</h2>
           <p id="rowCountLabel"></p>
         </div>
-        ${editable
-          ? `<button class="btn btn-primary" id="addRowBtn">+ Adicionar</button>`
-          : `<span class="readonly-note">Calculado automaticamente</span>`}
+        <div class="panel-actions">
+          <button class="btn" id="exportCsvBtn" type="button">Exportar CSV</button>
+          ${editable
+            ? `<button class="btn btn-primary" id="addRowBtn">+ Adicionar</button>`
+            : `<span class="readonly-note">Calculado automaticamente</span>`}
+        </div>
       </div>
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr>${visible.map(c => `<th>${esc(c.label)}</th>`).join("")}${editable ? `<th style="width:70px"></th>` : ""}</tr></thead>
+          <thead><tr>${visible.map(c => `<th data-sort="${esc(c.key)}" aria-sort="none"><button type="button" class="th-sort">${esc(c.label)}<span class="sort-ind" aria-hidden="true"></span></button></th>`).join("")}${editable ? `<th style="width:70px"></th>` : ""}</tr></thead>
           <tbody id="tableBody"></tbody>
         </table>
       </div>
@@ -138,6 +175,8 @@ async function renderTableView(container, item){
 
   const searchEl = container.querySelector("#searchInput");
   const selects = [...container.querySelectorAll("[data-filter-col]")];
+  const sort = { key: null, dir: 1 }; // clique no cabeçalho: crescente → decrescente → sem ordenação
+  let shown = rows;
 
   function drawBody(){
     const search = searchEl.value.trim().toLowerCase();
@@ -146,6 +185,19 @@ async function renderTableView(container, item){
       if (search && !visible.map(c => String(cellText(c, row))).join(" ").toLowerCase().includes(search)) return false;
       return active.every(([col, val]) => String(cellText(col, row)) === val);
     });
+    const sortCol = visible.find(c => c.key === sort.key);
+    if (sortCol){
+      filtered.sort((a, b) => {
+        const va = sortValue(sortCol, a), vb = sortValue(sortCol, b);
+        if (va === null) return vb === null ? 0 : 1;
+        if (vb === null) return -1;
+        return compareSortValues(va, vb) * sort.dir;
+      });
+    }
+    container.querySelectorAll("th[data-sort]").forEach(th => {
+      th.setAttribute("aria-sort", th.dataset.sort !== sort.key ? "none" : sort.dir === 1 ? "ascending" : "descending");
+    });
+    shown = filtered;
 
     const tbody = container.querySelector("#tableBody");
     tbody.innerHTML = filtered.length
@@ -156,7 +208,9 @@ async function renderTableView(container, item){
           </tr>`).join("")
       : `<tr><td colspan="${visible.length + 1}"><div class="empty-state">Nenhum registro encontrado.</div></td></tr>`;
 
-    container.querySelector("#rowCountLabel").textContent = `${filtered.length} de ${rows.length} registro(s)`;
+    const limite = App.meta.maxRows && rows.length >= App.meta.maxRows
+      ? ` · mostrando só os ${App.meta.maxRows} primeiros; use os filtros ou exporte por partes` : "";
+    container.querySelector("#rowCountLabel").textContent = `${filtered.length} de ${rows.length} registro(s)${limite}`;
 
     tbody.querySelectorAll("[data-edit]").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -188,6 +242,22 @@ async function renderTableView(container, item){
 
   searchEl.addEventListener("input", drawBody);
   selects.forEach(sel => sel.addEventListener("change", drawBody));
+
+  container.querySelectorAll("th[data-sort] .th-sort").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.parentElement.dataset.sort;
+      if (sort.key !== key){ sort.key = key; sort.dir = 1; }
+      else if (sort.dir === 1) sort.dir = -1;
+      else sort.key = null;
+      drawBody();
+    });
+  });
+
+  // exporta o que está na tela (filtros e ordenação aplicados)
+  container.querySelector("#exportCsvBtn").addEventListener("click", () => {
+    const hoje = new Date().toLocaleDateString("en-CA");
+    downloadCSV(`${item.key}-${hoje}.csv`, visible.map(c => c.label), shown.map(row => visible.map(c => csvValue(c, row))));
+  });
 
   container.querySelector("#addRowBtn")?.addEventListener("click", () => {
     App.openFormModal({
@@ -221,7 +291,7 @@ async function renderKanbanView(container, item){
       <div class="panel-head" style="border:none; padding:0 0 16px;">
         <div>
           <h2>${esc(item.label)}</h2>
-          <p>${data.cards.length} card(s) — arraste entre as colunas</p>
+          <p>${data.cards.length} card(s) — arraste para mover ou reordenar</p>
         </div>
         <button class="btn btn-primary" id="addCardBtn">+ Novo card</button>
       </div>
@@ -247,22 +317,42 @@ async function renderKanbanView(container, item){
   container.querySelectorAll(".kanban-card").forEach(cardEl => {
     cardEl.addEventListener("dragstart", e => {
       e.dataTransfer.setData("text/plain", cardEl.dataset.card);
-      setTimeout(() => cardEl.style.opacity = "0.4", 0);
+      setTimeout(() => cardEl.classList.add("dragging"), 0);
     });
-    cardEl.addEventListener("dragend", () => cardEl.style.opacity = "1");
+    cardEl.addEventListener("dragend", () => cardEl.classList.remove("dragging"));
   });
 
+  // card da coluna antes do qual o arrastado vai entrar (null = fim da coluna)
+  const cardBefore = (colEl, y) => [...colEl.querySelectorAll(".kanban-card:not(.dragging)")]
+    .find(el => { const r = el.getBoundingClientRect(); return y < r.top + r.height / 2; }) ?? null;
+  const clearMarks = (colEl) => colEl.querySelectorAll(".drop-before").forEach(el => el.classList.remove("drop-before"));
+
   container.querySelectorAll(".kanban-col").forEach(colEl => {
-    colEl.addEventListener("dragover", e => { e.preventDefault(); colEl.classList.add("drag-over"); });
-    colEl.addEventListener("dragleave", () => colEl.classList.remove("drag-over"));
+    colEl.addEventListener("dragover", e => {
+      e.preventDefault();
+      colEl.classList.add("drag-over");
+      clearMarks(colEl);
+      cardBefore(colEl, e.clientY)?.classList.add("drop-before");
+    });
+    colEl.addEventListener("dragleave", e => {
+      if (colEl.contains(e.relatedTarget)) return;
+      colEl.classList.remove("drag-over");
+      clearMarks(colEl);
+    });
     colEl.addEventListener("drop", async e => {
       e.preventDefault();
+      const before = cardBefore(colEl, e.clientY);
       colEl.classList.remove("drag-over");
+      clearMarks(colEl);
       const id = Number(e.dataTransfer.getData("text/plain"));
       const colunaId = Number(colEl.dataset.col);
       const card = data.cards.find(c => c.id === id);
-      if (!card || card.colunaId === colunaId) return;
-      try { await API.patch(`/kanban/cards/${id}`, { colunaId }); }
+      if (!card) return;
+      const others = [...colEl.querySelectorAll(".kanban-card")].filter(el => Number(el.dataset.card) !== id);
+      const posicao = before ? others.indexOf(before) : others.length;
+      const atual = data.cards.filter(c => c.colunaId === colunaId).map(c => c.id);
+      if (card.colunaId === colunaId && atual.indexOf(id) === posicao) return; // soltou no mesmo lugar
+      try { await API.patch(`/kanban/cards/${id}`, { colunaId, posicao }); }
       catch(err){ toast(err.message, "bad"); }
       reload();
     });
@@ -271,7 +361,7 @@ async function renderKanbanView(container, item){
   container.querySelectorAll("[data-del-card]").forEach(btn => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm("Excluir este card?")) return;
+      if (!(await App.confirm("Excluir este card?", { ok: "Excluir", danger: true }))) return;
       try { await API.del(`/kanban/cards/${btn.dataset.delCard}`); toast("Card excluído"); }
       catch(err){ toast(err.message, "bad"); }
       reload();
@@ -526,7 +616,7 @@ async function renderWeekView(container, item){
 
   container.querySelectorAll("[data-del-ev]").forEach(btn => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Excluir este evento?")) return;
+      if (!(await App.confirm("Excluir este evento?", { ok: "Excluir", danger: true }))) return;
       try { await API.del(`/eventos/${btn.dataset.delEv}`); toast("Evento excluído"); }
       catch(err){ toast(err.message, "bad"); }
       reload();
@@ -586,7 +676,7 @@ function openPermissionsModal(user, restritas, onSaved){
     ${checkGroupsHTML(restritas, new Set(user.permissoes))}
     <p class="form-error" hidden></p>
     <div class="modal-actions"><button type="submit" class="btn btn-primary modal-submit">Salvar</button></div>`;
-  document.getElementById("modalBackdrop").classList.add("open");
+  App.openModal();
 
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -718,19 +808,19 @@ async function renderUsersView(container){
     sel.value = "";
     switch (act){
       case "bloquear":
-        if (confirm(`Bloquear o acesso de ${u.nome}? A pessoa será desconectada.`))
-          run(() => API.patch(`/usuarios/${u.id}`, { status: "bloqueado" }), "Acesso bloqueado");
+        App.confirm(`Bloquear o acesso de ${u.nome}? A pessoa será desconectada.`, { ok: "Bloquear", danger: true })
+          .then(ok => ok && run(() => API.patch(`/usuarios/${u.id}`, { status: "bloqueado" }), "Acesso bloqueado"));
         break;
       case "ativar": run(() => API.patch(`/usuarios/${u.id}`, { status: "ativo" }), "Acesso liberado"); break;
       case "admin":
-        if (confirm(`Tornar ${u.nome} administrador? Administradores veem todas as telas e gerenciam usuários.`))
-          run(() => API.patch(`/usuarios/${u.id}`, { papel: "admin" }), "Agora é administrador");
+        App.confirm(`Tornar ${u.nome} administrador? Administradores veem todas as telas e gerenciam usuários.`, { ok: "Tornar administrador" })
+          .then(ok => ok && run(() => API.patch(`/usuarios/${u.id}`, { papel: "admin" }), "Agora é administrador"));
         break;
       case "usuario": run(() => API.patch(`/usuarios/${u.id}`, { papel: "usuario" }), "Administrador removido"); break;
       case "recusar":
       case "excluir":
-        if (confirm(`Excluir a conta de ${u.nome}? Essa ação não pode ser desfeita.`))
-          run(() => API.del(`/usuarios/${u.id}`), "Conta excluída");
+        App.confirm(`Excluir a conta de ${u.nome}? Essa ação não pode ser desfeita.`, { ok: "Excluir", danger: true })
+          .then(ok => ok && run(() => API.del(`/usuarios/${u.id}`), "Conta excluída"));
         break;
       case "senha":
         App.openFormModal({
@@ -750,11 +840,75 @@ async function renderUsersView(container){
 }
 
 /* =========================================================
+   HISTÓRICO DE ALTERAÇÕES (só admins)
+   ========================================================= */
+const ACAO = { criou: ["Criou", "ok"], alterou: ["Alterou", "info"], excluiu: ["Excluiu", "bad"] };
+
+/* Campos editáveis que mudaram, como "Status: Aberta → Concluída". */
+function auditChangesHTML(entry, mod){
+  if (entry.acao !== "alterou" || !mod || !entry.antes || !entry.depois) return "";
+  const changed = mod.columns.filter(c => !c.computed && String(cellText(c, entry.antes)) !== String(cellText(c, entry.depois)));
+  if (!changed.length) return `<span class="muted-note">Sem mudanças</span>`;
+  return `<ul class="audit-changes">${changed.map(c => `
+    <li><strong>${esc(c.label)}:</strong> <span class="audit-old">${esc(cellText(c, entry.antes))}</span> → ${esc(cellText(c, entry.depois))}</li>`).join("")}</ul>`;
+}
+
+async function renderAuditView(container, item, modulo = ""){
+  container.innerHTML = loadingHTML();
+  let rows;
+  try { rows = await API.get(`/auditoria${modulo ? `?modulo=${encodeURIComponent(modulo)}` : ""}`); }
+  catch(err){ container.innerHTML = errorHTML(err); return; }
+
+  const telas = App.meta.groups.flatMap(g => g.items).filter(i => i.type === "table" && !i.readOnly);
+  const modOf = (key) => telas.find(t => t.key === key);
+
+  container.innerHTML = `
+    <div class="filters">
+      <div class="filters-label">Filtros</div>
+      <div class="filters-grid">
+        <div class="field">
+          <label for="auditModulo">Tela</label>
+          <select id="auditModulo">
+            <option value="">Todas</option>
+            ${telas.map(t => `<option value="${esc(t.key)}" ${t.key === modulo ? "selected" : ""}>${esc(t.label)}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><div><h2>${esc(item.label)}</h2><p>Últimas ${rows.length} alteração(ões) feitas nas telas de cadastro</p></div></div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Quando</th><th>Usuário</th><th>Tela</th><th>Registro</th><th>Ação</th><th>Alterações</th></tr></thead>
+          <tbody>
+            ${rows.map(r => {
+              const mod = modOf(r.modulo);
+              const reg = r.depois ?? r.antes;
+              const [acao, kind] = ACAO[r.acao] ?? [r.acao, "neutral"];
+              return `<tr>
+                <td><span class="mono">${esc(fmtDateTime(r.quando))}</span></td>
+                <td>${esc(r.usuario)}</td>
+                <td>${esc(mod?.label ?? r.modulo)}</td>
+                <td>${mod && reg ? esc(cellText(mod.columns[0], reg)) : ""} <span class="muted-note">#${r.registroId}</span></td>
+                <td><span class="badge ${kind}">${esc(acao)}</span></td>
+                <td class="wrap">${auditChangesHTML(r, mod)}</td>
+              </tr>`;
+            }).join("") || `<tr><td colspan="6"><div class="empty-state">Nenhuma alteração registrada.</div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  container.querySelector("#auditModulo").addEventListener("change", (e) => renderAuditView(container, item, e.target.value));
+}
+
+/* =========================================================
    DISPATCH
    ========================================================= */
 function renderModule(container, item){
   switch (item.type){
     case "users": return renderUsersView(container);
+    case "audit": return renderAuditView(container, item);
     case "table": return renderTableView(container, item);
     case "kanban": return renderKanbanView(container, item);
     case "report": return renderReportView(container, item);

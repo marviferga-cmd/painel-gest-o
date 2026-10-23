@@ -570,6 +570,20 @@ table.data-table .mono, table.data-table td.mono{ font-family:var(--font-mono); 
 table.data-table tr:last-child td{ border-bottom:none; }
 
 .row-actions{ display:flex; gap:6px; justify-content:flex-end; }
+.panel-actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+
+/* ordenação pelo cabeçalho */
+table.data-table th .th-sort{ all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+table.data-table th .th-sort:hover{ color:var(--heading); }
+table.data-table th .th-sort:focus-visible{ outline:2px solid var(--indigo); outline-offset:3px; border-radius:4px; }
+.sort-ind::after{ content:"↕"; opacity:.35; }
+th[aria-sort="ascending"] .sort-ind::after{ content:"↑"; opacity:1; }
+th[aria-sort="descending"] .sort-ind::after{ content:"↓"; opacity:1; }
+
+/* histórico de alterações */
+table.data-table td.wrap{ white-space:normal; min-width:240px; }
+.audit-changes{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:3px; font-size:12px; }
+.audit-old{ color:var(--muted); text-decoration:line-through; }
 .icon-btn{
   background:transparent; border:1px solid var(--border);
   padding:5px 12px; border-radius:8px; color:var(--ink-soft); font-size:11.5px; font-weight:600;
@@ -653,6 +667,8 @@ tr:hover .icon-btn{ opacity:1; }
 }
 .kanban-card:hover{ border-color:var(--border-strong); transform:translateY(-1px); box-shadow:0 10px 20px -10px rgba(0,0,0,.7); }
 .kanban-card:active{ cursor:grabbing; }
+.kanban-card.dragging{ opacity:.4; }
+.kanban-card.drop-before{ box-shadow:0 -3px 0 0 var(--indigo); }
 .kanban-card .kc-title{ font-weight:600; margin-bottom:8px; line-height:1.35; }
 .kanban-card .kc-meta{ display:flex; align-items:center; justify-content:space-between; }
 .kanban-card .kc-tag{ font-family:var(--font-mono); font-size:10.5px; color:var(--indigo); }
@@ -799,6 +815,14 @@ tr:hover .icon-btn{ opacity:1; }
   transition:all .15s;
 }
 .modal-delete:hover{ background:var(--red-soft); border-color:var(--red); }
+
+/* confirmação (substitui o confirm() do navegador) */
+.confirm-backdrop{ z-index:60; }
+.modal-confirm{ max-width:400px; padding:22px; }
+.confirm-msg{ font-size:14px; line-height:1.55; color:var(--ink); margin-bottom:18px; }
+.modal-confirm .modal-actions{ display:flex; justify-content:flex-end; gap:8px; }
+.btn-danger{ background:var(--red); border-color:transparent; color:#fff; }
+.btn-danger:hover{ filter:brightness(1.1); background:var(--red); border-color:transparent; color:#fff; }
 
 /* =========================================================
    RESPONSIVE

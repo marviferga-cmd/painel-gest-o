@@ -351,7 +351,8 @@ model Usuario {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
-  sessoes Sessao[]
+  sessoes    Sessao[]
+  auditorias Auditoria[]
 
   @@map("usuarios")
 }
@@ -374,4 +375,38 @@ model TelaRestrita {
   chave String @id // chave do módulo (src/modules.js)
 
   @@map("telas_restritas")
+}
+
+// Limite de tentativas de login/cadastro por IP (no banco: vale entre reinícios e instâncias).
+model LimiteTentativa {
+  chave String   @id // "login|<ip>" ou "cadastro|<ip>"
+  n     Int
+  ate   DateTime // fim da janela atual
+
+  @@index([ate])
+  @@map("limite_tentativas")
+}
+
+// ---------------------------------------------------------------
+// HISTÓRICO DE ALTERAÇÕES
+// ---------------------------------------------------------------
+
+// Quem criou/alterou/excluiu cada registro das telas de cadastro.
+// antes/depois guardam a linha como a tabela mostra (com os nomes já resolvidos).
+model Auditoria {
+  id          Int      @id @default(autoincrement())
+  usuarioId   Int?     @map("usuario_id")
+  usuarioNome String   @map("usuario_nome") // mantido mesmo se a conta for excluída
+  modulo      String // chave do módulo (src/modules.js)
+  registroId  Int      @map("registro_id")
+  acao        String // criou | alterou | excluiu
+  antes       Json?
+  depois      Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([modulo, registroId])
+  @@index([createdAt])
+  @@map("auditoria")
 }

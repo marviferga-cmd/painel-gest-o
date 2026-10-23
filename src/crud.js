@@ -3,8 +3,9 @@ import {
   formatHours, monthLabel, parseDate, parseDateTime, parseHours, parseInteger,
   parseMoney, parseMonth, toDateString, toMonthString, ValidationError,
 } from "./lib/format.js";
+import { httpError } from "./lib/http.js";
 
-const MAX_ROWS = 2000;
+export const MAX_ROWS = 2000;
 
 /* ---------- banco -> linha da tabela ---------- */
 export function toRow(mod, rec) {
@@ -80,30 +81,48 @@ export async function listRows(prisma, mod) {
 
 async function fetchOne(prisma, mod, id) {
   const rec = await prisma[mod.model].findUnique({ where: { id }, include: mod.include });
-  if (!rec) { const e = new Error("Registro não encontrado"); e.status = 404; throw e; }
+  if (!rec) throw httpError(404, "Registro não encontrado");
   return rec;
 }
 
-export async function createRow(prisma, mod, body) {
+/* Histórico (tabela auditoria): guarda a linha como a tela mostra, antes e depois.
+   Falhar aqui não desfaz a gravação, só fica registrado no log. */
+async function auditar(prisma, user, mod, acao, registroId, antes, depois) {
+  if (!user) return;
+  try {
+    await prisma.auditoria.create({
+      data: { usuarioId: user.id, usuarioNome: user.nome, modulo: mod.key, registroId, acao, antes: antes ?? undefined, depois: depois ?? undefined },
+    });
+  } catch (err) {
+    console.error("Falha ao registrar auditoria:", err);
+  }
+}
+
+export async function createRow(prisma, mod, body, user) {
   const data = fromInput(mod, body);
   mod.validate?.(data);
   await mod.beforeSave?.(data, prisma, null);
   const rec = await prisma[mod.model].create({ data, include: mod.include });
-  return toRow(mod, rec);
+  const row = toRow(mod, rec);
+  await auditar(prisma, user, mod, "criou", rec.id, null, row);
+  return row;
 }
 
-export async function updateRow(prisma, mod, id, body) {
+export async function updateRow(prisma, mod, id, body, user) {
   const existing = await fetchOne(prisma, mod, id);
   const data = fromInput(mod, body, { partial: true });
   mod.validate?.({ ...existing, ...data });
   await mod.beforeSave?.(data, prisma, existing);
   const rec = await prisma[mod.model].update({ where: { id }, data, include: mod.include });
-  return toRow(mod, rec);
+  const row = toRow(mod, rec);
+  await auditar(prisma, user, mod, "alterou", id, toRow(mod, existing), row);
+  return row;
 }
 
-export async function deleteRow(prisma, mod, id) {
-  await fetchOne(prisma, mod, id);
+export async function deleteRow(prisma, mod, id, user) {
+  const existing = await fetchOne(prisma, mod, id);
   await prisma[mod.model].delete({ where: { id } });
+  await auditar(prisma, user, mod, "excluiu", id, toRow(mod, existing), null);
 }
 
 /* ---------- listas para os <select> de chaves estrangeiras ---------- */

@@ -61,7 +61,8 @@
 
   wire(cadastroForm, async ({ nome, email, senha, senha2 }) => {
     if (!nome.trim() || !email.trim() || !senha) throw new Error("Preencha todos os campos");
-    if (senha.length < 8) throw new Error("A senha deve ter pelo menos 8 caracteres");
+    const min = document.getElementById("cadSenha").minLength;
+    if (senha.length < min) throw new Error(`A senha deve ter pelo menos ${min} caracteres`);
     if (senha !== senha2) throw new Error("As senhas não conferem");
     const r = await post("cadastro", { nome, email, senha });
     if (!r.pendente) return location.replace("/"); // primeiro usuário em ambiente de desenvolvimento

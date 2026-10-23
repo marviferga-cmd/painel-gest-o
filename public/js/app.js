@@ -9,21 +9,9 @@ const App = {
     try {
       this.meta = await API.get("/meta");
     } catch(err){
-      // Fallback: se a API não estiver disponível (ex.: servindo os arquivos estáticos),
-      // tente carregar um meta local `meta.json` para habilitar a navegação.
-      try {
-        const res = await fetch("meta.json");
-        if (res.ok) {
-          this.meta = await res.json();
-          console.warn("Usando meta.json local como fallback para /api/meta");
-        } else {
-          throw err;
-        }
-      } catch(e) {
-        document.getElementById("content").innerHTML = errorHTML(err);
-        document.getElementById("viewTitle").textContent = "Erro";
-        return;
-      }
+      document.getElementById("content").innerHTML = errorHTML(err);
+      document.getElementById("viewTitle").textContent = "Erro";
+      return;
     }
     document.getElementById("resetData").hidden = !this.meta.allowReset;
     this.renderUser();
@@ -34,6 +22,10 @@ const App = {
       const key = decodeURIComponent(location.hash.slice(1)) || "home";
       if (key !== this.currentKey) this.navigate(key, { replace: true });
     });
+
+    // contador de chamados em risco: atualiza sozinho enquanto a aba estiver visível
+    setInterval(() => { if (!document.hidden) this.refreshNavCounts(); }, 60e3);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) this.refreshNavCounts(); });
   },
 
   findItem(key){
@@ -134,11 +126,10 @@ const App = {
 
   /* ---------------- MODAL DE FORMULÁRIO ---------------- */
   async openFormModal({ title, fields, onSubmit, initialValues, onDelete }){
-    const backdrop = document.getElementById("modalBackdrop");
     const form = document.getElementById("modalForm");
     document.getElementById("modalTitle").textContent = title;
     form.innerHTML = loadingHTML("Carregando formulário…");
-    backdrop.classList.add("open");
+    this.openModal();
 
     // carrega as listas das chaves estrangeiras antes de montar o formulário
     const lookups = {};
@@ -155,6 +146,11 @@ const App = {
       + `<div class="modal-actions">`
       + (onDelete ? `<button type="button" class="modal-delete" id="modalDeleteBtn">Excluir</button>` : "")
       + `<button type="submit" class="btn btn-primary modal-submit">Salvar</button></div>`;
+
+    // fechar com alterações não salvas pede confirmação
+    const snapshot = () => fields.map(f => form.elements.namedItem(f.key)?.value ?? "").join("\u0000");
+    const inicial = snapshot();
+    this.dirtyCheck = () => snapshot() !== inicial;
 
     const errorEl = form.querySelector("#formError");
     const submitBtn = form.querySelector(".modal-submit");
@@ -190,7 +186,7 @@ const App = {
     };
 
     form.querySelector("#modalDeleteBtn")?.addEventListener("click", async () => {
-      if (!confirm("Excluir este registro? Essa ação não pode ser desfeita.")) return;
+      if (!(await this.confirm("Excluir este registro? Essa ação não pode ser desfeita.", { ok: "Excluir", danger: true }))) return;
       try {
         await onDelete();
         this.closeModal();
@@ -200,7 +196,7 @@ const App = {
     form.querySelector("input,select")?.focus();
   },
 
-  fieldHTML(f, current, lookups){
+  fieldHTML(f, current, lookups, init = {}){
     const id = `f_${f.key}`;
     const req = f.required ? "required" : "";
     const star = f.required ? ` <span class="req">*</span>` : "";
@@ -210,10 +206,15 @@ const App = {
       `<option value="${esc(o.value)}" ${String(o.value) === String(selected ?? "") ? "selected" : ""}>${esc(o.label)}</option>`).join("");
 
     switch (f.type){
-      case "ref":
+      case "ref": {
+        // a lista omite inativos e itens antigos; sem isto o vínculo atual sumiria ao salvar
+        const list = lookups[f.ref] || [];
+        const missing = current !== null && current !== undefined && !list.some(o => String(o.value) === String(current));
+        const full = missing ? [{ value: current, label: init._labels?.[f.key] ?? `#${current}` }, ...list] : list;
         return wrap(`<select id="${id}" name="${esc(f.key)}" ${req}>
           <option value="">${f.required ? "Selecione…" : "— nenhum —"}</option>
-          ${opts(lookups[f.ref] || [], current)}</select>`);
+          ${opts(full, current)}</select>`);
+      }
       case "select":
         return wrap(`<select id="${id}" name="${esc(f.key)}" ${req}>${opts(f.options, current)}</select>`);
       case "status":
@@ -257,16 +258,74 @@ const App = {
     document.querySelector('meta[name="theme-color"]').setAttribute("content", light ? "#F4F6FB" : "#090E1A");
   },
 
+  /* ---------------- MODAL ---------------- */
+  dirtyCheck: null,
+  lastFocus: null,
+  confirmResolve: null,
+
+  openModal(){
+    const backdrop = document.getElementById("modalBackdrop");
+    if (!backdrop.classList.contains("open")) this.lastFocus = document.activeElement;
+    this.dirtyCheck = null;
+    backdrop.classList.add("open");
+  },
+
   closeModal(){
+    this.dirtyCheck = null;
     document.getElementById("modalBackdrop").classList.remove("open");
+    this.lastFocus?.focus?.();
+    this.lastFocus = null;
+  },
+
+  /* fechar pelo ×, Esc ou clique fora: confirma se houver alterações não salvas */
+  async requestCloseModal(){
+    if (this.dirtyCheck?.() && !(await this.confirm("Descartar as alterações não salvas?", { ok: "Descartar", danger: true }))) return;
+    this.closeModal();
+  },
+
+  /* Substitui o confirm() nativo. Resolve true/false. */
+  confirm(message, { ok = "Confirmar", danger = false } = {}){
+    const backdrop = document.getElementById("confirmBackdrop");
+    const okBtn = document.getElementById("confirmOk");
+    const cancelBtn = document.getElementById("confirmCancel");
+    const prevFocus = document.activeElement;
+    document.getElementById("confirmMsg").textContent = message;
+    okBtn.textContent = ok;
+    okBtn.className = danger ? "btn btn-danger" : "btn btn-primary";
+    backdrop.classList.add("open");
+    okBtn.focus();
+    return new Promise(resolve => {
+      const done = (value) => {
+        backdrop.classList.remove("open");
+        okBtn.onclick = cancelBtn.onclick = backdrop.onmousedown = null;
+        this.confirmResolve = null;
+        prevFocus?.focus?.();
+        resolve(value);
+      };
+      this.confirmResolve = done;
+      okBtn.onclick = () => done(true);
+      cancelBtn.onclick = () => done(false);
+      backdrop.onmousedown = (e) => { if (e.target === backdrop) done(false); };
+    });
   },
 
   wireGlobalEvents(){
-    document.getElementById("modalClose").addEventListener("click", () => this.closeModal());
+    document.getElementById("modalClose").addEventListener("click", () => this.requestCloseModal());
     document.getElementById("modalBackdrop").addEventListener("mousedown", (e) => {
-      if (e.target.id === "modalBackdrop") this.closeModal();
+      if (e.target.id === "modalBackdrop") this.requestCloseModal();
     });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") this.closeModal(); });
+    document.addEventListener("keydown", (e) => {
+      const confirmOpen = document.getElementById("confirmBackdrop").classList.contains("open");
+      const modalOpen = document.getElementById("modalBackdrop").classList.contains("open");
+      if (e.key === "Escape"){
+        if (confirmOpen) this.confirmResolve?.(false);
+        else if (modalOpen) this.requestCloseModal();
+      }
+      if (e.key === "Tab"){
+        if (confirmOpen) trapFocus(e, document.querySelector("#confirmBackdrop .modal"));
+        else if (modalOpen) trapFocus(e, document.querySelector("#modalBackdrop .modal"));
+      }
+    });
     document.getElementById("navToggle").addEventListener("click", () => document.body.classList.toggle("nav-open"));
 
     this.syncThemeUI();
@@ -312,7 +371,7 @@ const App = {
     });
 
     document.getElementById("resetData").addEventListener("click", async () => {
-      if (!confirm("Isso APAGA todos os dados do banco e grava os dados de exemplo. Continuar?")) return;
+      if (!(await this.confirm("Isso APAGA todos os dados do banco e grava os dados de exemplo. Continuar?", { ok: "Apagar e restaurar", danger: true }))) return;
       const content = document.getElementById("content");
       content.innerHTML = loadingHTML("Restaurando dados de exemplo…");
       try {

@@ -45,6 +45,7 @@ export async function seed(prisma) {
     await tx.kanbanCard.deleteMany();
     await tx.kanbanColuna.deleteMany();
     await tx.evento.deleteMany();
+    await tx.auditoria.deleteMany(); // o histórico apontaria para registros que não existem mais
     await tx.colaborador.deleteMany();
     await tx.cargo.deleteMany();
     await tx.servico.deleteMany();

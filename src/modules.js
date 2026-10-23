@@ -28,7 +28,7 @@ export const GROUPS = [
   { key: "geral", label: "Geral" },
 ];
 
-const OS_FINALIZADAS = ["Concluída", "Cancelada"];
+export const OS_FINALIZADAS = ["Concluída", "Cancelada"];
 
 export const MODULES = [
   /* ---------------------------- PESSOAS ---------------------------- */
@@ -200,9 +200,10 @@ export const MODULES = [
       { key: "status", label: "Status", type: "status",
         options: ["Aberta", "Em execução", "Em risco", "Concluída", "Cancelada"] },
     ],
-    beforeSave(d) {
-      if (d.status === "Concluída" && !d.concluidaEm) d.concluidaEm = new Date();
-      if (d.status && d.status !== "Concluída") d.concluidaEm = null;
+    // concluidaEm não está no formulário: preserva a data original ao reeditar uma OS já concluída
+    beforeSave(d, prisma, existing) {
+      if (d.status === "Concluída") d.concluidaEm = existing?.concluidaEm ?? new Date();
+      else if (d.status) d.concluidaEm = null;
     },
   },
   {
@@ -254,21 +255,23 @@ export const MODULES = [
         return new Date(r.vencimento) < hojeUTC() ? "Vencida" : "A vencer";
       } },
     ],
-    beforeSave(d) {
-      if (d.status === "Pago" && !d.pagoEm) d.pagoEm = hojeUTC();
-      if (d.status && d.status !== "Pago") d.pagoEm = null;
+    // pagoEm não está no formulário: preserva a data original ao reeditar uma fatura já paga
+    beforeSave(d, prisma, existing) {
+      if (d.status === "Pago") d.pagoEm = existing?.pagoEm ?? hojeUTC();
+      else if (d.status) d.pagoEm = null;
     },
   },
   {
     key: "notas-fiscais", group: "os", label: "Notas Fiscais", icon: "invoice", accent: "slate",
     desc: "Notas fiscais emitidas, valores e situação de cada uma.",
     type: "table", model: "notaFiscal",
-    include: { cliente: nomeSel },
+    include: { cliente: nomeSel, fatura: { select: { id: true, valor: true, cliente: nomeSel } } },
     orderBy: { emissao: "desc" },
     columns: [
       { key: "numero", label: "Nº NF", type: "text", required: true },
       { key: "clienteId", label: "Cliente", type: "ref", ref: "clientes", relation: "cliente", required: true },
-      { key: "faturaId", label: "Fatura vinculada", type: "ref", ref: "faturas", table: false },
+      { key: "faturaId", label: "Fatura vinculada", type: "ref", ref: "faturas", table: false,
+        label_of: (r) => (r.fatura ? `#${r.fatura.id} · ${r.fatura.cliente.nome} · R$ ${Number(r.fatura.valor).toFixed(2)}` : null) },
       { key: "valor", label: "Valor", type: "money", required: true },
       { key: "emissao", label: "Emissão", type: "date", required: true },
       { key: "status", label: "Status", type: "status", options: ["Emitida", "Cancelada", "Substituída"] },

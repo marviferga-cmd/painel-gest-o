@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { prisma } from "./db.js";
-import { findModule, MODULES, publicMeta } from "./modules.js";
-import { createRow, deleteRow, listRows, LOOKUPS, updateRow } from "./crud.js";
+import { findModule, MODULES, OS_FINALIZADAS, publicMeta } from "./modules.js";
+import { createRow, deleteRow, listRows, LOOKUPS, MAX_ROWS, updateRow } from "./crud.js";
 import { slaStatus, tempoRestante, todayDate, ValidationError } from "./lib/format.js";
+import { httpError, idParam } from "./lib/http.js";
 import { seed } from "../prisma/seed.js";
 import {
   authApi, carregarUsuario, exigirAdmin, exigirLogin, exigirTela,
@@ -18,20 +19,10 @@ api.use("/usuarios", usuariosApi);
 
 const allowReset = () => process.env.ALLOW_DEMO_RESET === "true";
 
-function idParam(req) {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) throw new ValidationError("id inválido");
-  return id;
-}
-
 function tableModule(req, { write = false } = {}) {
   const mod = findModule(req.params.key);
-  if (!mod || mod.type !== "table") {
-    const e = new Error(`Módulo desconhecido: ${req.params.key}`); e.status = 404; throw e;
-  }
-  if (write && mod.readOnly) {
-    const e = new Error("Este painel é calculado automaticamente e não aceita edição"); e.status = 405; throw e;
-  }
+  if (!mod || mod.type !== "table") throw httpError(404, `Módulo desconhecido: ${req.params.key}`);
+  if (write && mod.readOnly) throw httpError(405, "Este painel é calculado automaticamente e não aceita edição");
   return mod;
 }
 
@@ -53,12 +44,16 @@ api.get("/meta", async (req, res) => {
   if (req.user.papel === "admin") {
     meta.groups.push({
       key: "admin", label: "Administração",
-      items: [{ key: "usuarios", label: "Usuários e acesso", icon: "usercheck", accent: "indigo", type: "users",
-        desc: "Aprovar cadastros, bloquear contas e definir quem pode ver cada tela restrita." }],
+      items: [
+        { key: "usuarios", label: "Usuários e acesso", icon: "usercheck", accent: "indigo", type: "users",
+          desc: "Aprovar cadastros, bloquear contas e definir quem pode ver cada tela restrita." },
+        { key: "historico", label: "Histórico de alterações", icon: "clipboard", accent: "slate", type: "audit",
+          desc: "Quem criou, alterou ou excluiu cada registro das telas de cadastro." },
+      ],
     });
     meta.pendentes = await prisma.usuario.count({ where: { status: "pendente" } });
   }
-  res.json({ ...meta, user: usuarioPublico(req.user), allowReset: allowReset() && req.user.papel === "admin" });
+  res.json({ ...meta, maxRows: MAX_ROWS, user: usuarioPublico(req.user), allowReset: allowReset() && req.user.papel === "admin" });
 });
 
 // a lista de faturas mostra valores: só para quem vê as telas financeiras
@@ -74,15 +69,15 @@ api.get("/modules/:key", exigirTela(telaDoParam), async (req, res) => {
 });
 
 api.post("/modules/:key", exigirTela(telaDoParam), async (req, res) => {
-  res.status(201).json(await createRow(prisma, tableModule(req, { write: true }), req.body));
+  res.status(201).json(await createRow(prisma, tableModule(req, { write: true }), req.body, req.user));
 });
 
 api.put("/modules/:key/:id", exigirTela(telaDoParam), async (req, res) => {
-  res.json(await updateRow(prisma, tableModule(req, { write: true }), idParam(req), req.body));
+  res.json(await updateRow(prisma, tableModule(req, { write: true }), idParam(req), req.body, req.user));
 });
 
 api.delete("/modules/:key/:id", exigirTela(telaDoParam), async (req, res) => {
-  await deleteRow(prisma, tableModule(req, { write: true }), idParam(req));
+  await deleteRow(prisma, tableModule(req, { write: true }), idParam(req), req.user);
   res.status(204).end();
 });
 
@@ -108,6 +103,7 @@ api.post("/kanban/:board/cards", exigirTela((req) => telaDoQuadro(req.params.boa
   const titulo = String(req.body?.titulo ?? "").trim();
   const colunaId = Number(req.body?.colunaId);
   if (!titulo) throw new ValidationError("Título é obrigatório");
+  if (!Number.isInteger(colunaId) || colunaId <= 0) throw new ValidationError("Coluna inválida");
   const coluna = await prisma.kanbanColuna.findFirst({ where: { id: colunaId, quadro: req.params.board } });
   if (!coluna) throw new ValidationError("Coluna inválida");
   const card = await prisma.kanbanCard.create({
@@ -116,17 +112,38 @@ api.post("/kanban/:board/cards", exigirTela((req) => telaDoQuadro(req.params.boa
   res.status(201).json(card);
 });
 
+/* Mover: { colunaId, posicao? } — posicao é o índice na coluna de destino (sem ele, vai para o fim).
+   Os outros cards da coluna são renumerados na mesma transação. */
 api.patch("/kanban/cards/:id", exigirTela(telaDoCard), async (req, res) => {
   const id = idParam(req);
   const data = {};
-  if (req.body?.colunaId !== undefined) {
-    data.colunaId = Number(req.body.colunaId);
-    if (!(await prisma.kanbanColuna.findUnique({ where: { id: data.colunaId } }))) throw new ValidationError("Coluna inválida");
-    data.ordem = await nextOrder(data.colunaId);
-  }
+  const reordenar = [];
   if (req.body?.titulo !== undefined) data.titulo = String(req.body.titulo).trim().slice(0, 300);
   if (req.body?.etiqueta !== undefined) data.etiqueta = String(req.body.etiqueta).trim() || null;
-  res.json(await prisma.kanbanCard.update({ where: { id }, data }));
+  if (req.body?.colunaId !== undefined) {
+    // só move dentro do mesmo quadro: a permissão foi checada para o quadro de origem
+    data.colunaId = Number(req.body.colunaId);
+    const card = await prisma.kanbanCard.findUnique({ where: { id }, include: { coluna: { select: { quadro: true } } } });
+    if (!card) throw httpError(404, "Registro não encontrado");
+    const destino = Number.isInteger(data.colunaId) && data.colunaId > 0
+      ? await prisma.kanbanColuna.findFirst({ where: { id: data.colunaId, quadro: card.coluna.quadro } })
+      : null;
+    if (!destino) throw new ValidationError("Coluna inválida");
+
+    const outros = await prisma.kanbanCard.findMany({
+      where: { colunaId: data.colunaId, id: { not: id } },
+      orderBy: [{ ordem: "asc" }, { id: "asc" }],
+      select: { id: true },
+    });
+    const pos = Number(req.body.posicao);
+    data.ordem = Number.isInteger(pos) ? Math.max(0, Math.min(pos, outros.length)) : outros.length;
+    outros.forEach((c, i) => {
+      const ordem = i < data.ordem ? i : i + 1;
+      reordenar.push(prisma.kanbanCard.update({ where: { id: c.id }, data: { ordem } }));
+    });
+  }
+  const resultado = await prisma.$transaction([...reordenar, prisma.kanbanCard.update({ where: { id }, data })]);
+  res.json(resultado.at(-1));
 });
 
 api.delete("/kanban/cards/:id", exigirTela(telaDoCard), async (req, res) => {
@@ -165,7 +182,7 @@ api.get("/resumo/os", exigirTela("indicadores"), async (req, res) => {
     prisma.colaborador.count({ where: { ativo: true } }),
   ]);
   const hoje = todayDate();
-  const abertas = ordens.filter((o) => !["Concluída", "Cancelada"].includes(o.status));
+  const abertas = ordens.filter((o) => !OS_FINALIZADAS.includes(o.status));
   const atrasadas = abertas.filter((o) => o.prazo < hoje);
   const soma = (arr) => arr.reduce((s, f) => s + Number(f.valor), 0);
   const validas = faturas.filter((f) => f.status !== "Cancelado");
@@ -183,7 +200,7 @@ api.get("/resumo/os", exigirTela("indicadores"), async (req, res) => {
     ordens: ordens.map((o) => ({
       numero: o.numero, cliente: o.cliente.nome, servico: o.servico?.nome ?? "—",
       responsavel: o.responsavel?.nome ?? "—", prazo: o.prazo.toISOString().slice(0, 10),
-      status: o.status, atrasada: !["Concluída", "Cancelada"].includes(o.status) && o.prazo < hoje,
+      status: o.status, atrasada: !OS_FINALIZADAS.includes(o.status) && o.prazo < hoje,
     })),
   });
 });
@@ -203,7 +220,7 @@ api.get("/resumo/clientes", exigirTela("relatorios"), async (req, res) => {
     return {
       cliente: c.nome,
       osTotal: c.ordens.length,
-      osAbertas: c.ordens.filter((o) => !["Concluída", "Cancelada"].includes(o.status)).length,
+      osAbertas: c.ordens.filter((o) => !OS_FINALIZADAS.includes(o.status)).length,
       faturado: validas.reduce((s, f) => s + Number(f.valor), 0),
       emAberto: validas.filter((f) => f.status === "Em aberto").reduce((s, f) => s + Number(f.valor), 0),
       chamadosAbertos: abertos.length,
@@ -239,6 +256,19 @@ api.get("/resumo/alertas", exigirTela(["chamados-risco", "dashboards-sla"]), asy
   const limite = new Date(Date.now() + 24 * 3600e3);
   const emRisco = await prisma.chamado.count({ where: { concluidoEm: null, prazoEm: { lt: limite } } });
   res.json({ chamadosEmRisco: emRisco });
+});
+
+/* ---------------- histórico de alterações (só admin) ---------------- */
+api.get("/auditoria", exigirAdmin, async (req, res) => {
+  const where = {};
+  if (req.query.modulo) where.modulo = String(req.query.modulo);
+  if (req.query.registroId) where.registroId = Number(req.query.registroId) || 0;
+  const limite = Math.min(Math.max(Number(req.query.limite) || 200, 1), 1000);
+  const linhas = await prisma.auditoria.findMany({ where, orderBy: { id: "desc" }, take: limite });
+  res.json(linhas.map((a) => ({
+    id: a.id, quando: a.createdAt.toISOString(), usuario: a.usuarioNome, modulo: a.modulo,
+    registroId: a.registroId, acao: a.acao, antes: a.antes, depois: a.depois,
+  })));
 });
 
 /* ---------------- administração ---------------- */

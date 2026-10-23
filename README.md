@@ -35,8 +35,12 @@ painel-gestao/
 │   ├── modules.js                  → definição dos módulos (colunas, validações, cálculos)
 │   ├── crud.js                     → CRUD genérico + listas para os selects
 │   ├── db.js                       → Prisma Client (driver pg, sem binário nativo)
-│   └── lib/format.js               → datas, horas, dinheiro, regras de SLA
+│   ├── lib/format.js               → datas, horas, dinheiro, regras de SLA
+│   └── lib/http.js                 → helpers de rota (erros HTTP, id da URL)
 ├── public/                         → frontend (index.html, css, js)
+├── test/                           → testes unitários (npm test, sem banco)
+├── scripts/                        → check.js (sintaxe) e smoke.js (teste da API rodando)
+├── .github/workflows/ci.yml        → CI: testes, migrações num Postgres limpo e smoke test
 ├── Dockerfile · docker-compose.yml · render.yaml
 └── .env.example
 ```
@@ -63,6 +67,18 @@ Sem Postgres instalado? Suba tudo com Docker:
 docker compose up -d --build
 docker compose exec app npm run db:seed   # opcional
 ```
+
+## Testes
+
+```bash
+npm run check        # sintaxe de todos os .js
+npm test             # regras de negócio (format.js, beforeSave, validações) — não precisa de banco
+npm run test:smoke   # com o servidor rodando e o seed aplicado: login, todas as telas, CRUD, histórico, Kanban, sessões
+```
+
+O smoke test usa `ADMIN_EMAIL`/`ADMIN_PASSWORD` do `.env` e cria/apaga registros de teste. Não rode em produção.
+
+A cada push no `main`, o GitHub Actions roda tudo isso num PostgreSQL limpo e ainda confere se as migrações batem com o `schema.prisma`.
 
 ## Deploy
 
@@ -112,6 +128,7 @@ Qualquer plataforma Node funciona: build `npm ci`, start `npm run start:prod`, v
 | GET | `/api/resumo/os` · `/clientes` · `/sla` · `/alertas` | Indicadores calculados |
 | POST | `/api/auth/login` · `/cadastro` · `/logout` · `/senha` | Sessão e conta do usuário |
 | GET / PATCH / POST / DELETE | `/api/usuarios[/:id]` · PUT `/api/usuarios/telas-restritas` | Administração de usuários (só admin) |
+| GET | `/api/auditoria` | Histórico de alterações (`?modulo=&registroId=&limite=`, só admin) |
 | GET | `/healthz` | Verifica servidor e banco |
 
 ## Login e permissões
@@ -119,7 +136,13 @@ Qualquer plataforma Node funciona: build `npm ci`, start `npm run start:prod`, v
 - Qualquer pessoa pode **criar conta** na tela de login, mas só entra depois que um administrador **aprovar** (menu *Administração → Usuários e acesso*, que mostra um contador de pendentes).
 - Na mesma tela o admin marca quais **telas são restritas**. Telas restritas só aparecem (e só respondem na API) para administradores e para quem tiver a tela liberada. As demais ficam visíveis para todo usuário aprovado. Por padrão vêm restritas: *Cargos e Salários*, *Faturamento* e *Notas Fiscais*.
 - O admin também pode bloquear contas, promover outros administradores, redefinir senhas e excluir contas. Cada usuário troca a própria senha pelo menu com seu nome, no topo.
-- Senhas guardadas com scrypt; sessão em cookie `HttpOnly` de 7 dias; limite de tentativas de login por IP.
+- Senhas guardadas com scrypt; sessão em cookie `HttpOnly` de 7 dias. Trocar a senha desconecta os outros aparelhos.
+- Limite de tentativas por IP (10 senhas erradas em 15 min; 5 cadastros por hora), guardado no banco: vale entre reinícios e com mais de uma instância.
+- Toda criação, alteração e exclusão nas telas de cadastro fica em *Administração → Histórico de alterações* (quem, quando e o que mudou).
+
+## Tabelas
+
+Clique no cabeçalho para ordenar (crescente → decrescente → original). **Exportar CSV** baixa o que está na tela, com filtros e ordenação, em formato que o Excel em português abre direto. Cada tela carrega até 2000 registros; acima disso, a contagem avisa.
 
 ## Regras de SLA
 

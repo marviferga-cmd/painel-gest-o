@@ -68,3 +68,32 @@ function toast(message, kind = "ok"){
   setTimeout(() => el.classList.add("out"), 3500);
   setTimeout(() => el.remove(), 4000);
 }
+
+/* Mantém o Tab dentro do diálogo aberto. */
+function trapFocus(e, root){
+  if (!root) return;
+  const items = [...root.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter(el => !el.disabled && el.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (!root.contains(document.activeElement)){ e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+}
+
+/* Gera e baixa um CSV (separador ";" e BOM para o Excel em português abrir certo). */
+function downloadCSV(filename, header, lines){
+  const cell = (v) => {
+    const s = String(v ?? "");
+    return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = "\uFEFF" + [header, ...lines].map(l => l.map(cell).join(";")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

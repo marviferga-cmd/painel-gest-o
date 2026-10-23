@@ -12,6 +12,7 @@ import { Router } from "express";
 import { prisma } from "./db.js";
 import { GROUPS, MODULES } from "./modules.js";
 import { ValidationError } from "./lib/format.js";
+import { idParam } from "./lib/http.js";
 
 const scrypt = promisify(scryptCb);
 const COOKIE = "painel_sessao";
@@ -81,9 +82,23 @@ export function exigirAdmin(req, res, next) {
   res.status(403).json({ error: "Apenas administradores podem fazer isso" });
 }
 
-/* ---------------- permissões por tela ---------------- */
+/* Encerra as sessões do usuário; passando `req`, mantém a sessão dessa requisição (quem trocou a própria senha). */
+async function encerrarSessoes(usuarioId, req = null) {
+  const token = req && lerCookie(req, COOKIE);
+  await prisma.sessao.deleteMany({ where: { usuarioId, ...(token ? { id: { not: sha256(token) } } : {}) } });
+}
+
+/* ---------------- permissões por tela ----------------
+   Consultada em toda requisição e quase nunca muda: cache curto, zerado ao salvar.
+   (Com várias instâncias, as outras enxergam a mudança em até 30 s.) */
+const CACHE_RESTRITAS_MS = 30e3;
+let cacheRestritas = null;
+
 export async function telasRestritas() {
-  return new Set((await prisma.telaRestrita.findMany()).map((t) => t.chave));
+  if (cacheRestritas && Date.now() - cacheRestritas.at < CACHE_RESTRITAS_MS) return cacheRestritas.chaves;
+  const chaves = new Set((await prisma.telaRestrita.findMany()).map((t) => t.chave));
+  cacheRestritas = { at: Date.now(), chaves };
+  return chaves;
 }
 
 export function podeVer(user, chave, restritas) {
@@ -106,21 +121,28 @@ export const usuarioPublico = (u) => ({
   permissoes: u.permissoes, ultimoAcesso: u.ultimoAcesso, createdAt: u.createdAt,
 });
 
-/* ---------------- limite de tentativas (memória, por IP) ---------------- */
-const tentativas = new Map();
-function limiteTentativas(max, janelaMin) {
-  return (req, res, next) => {
-    const agora = Date.now();
-    const chave = `${req.path}|${req.ip}`;
-    const t = tentativas.get(chave);
-    if (!t || t.ate < agora) tentativas.set(chave, { n: 1, ate: agora + janelaMin * 60e3 });
-    else if (++t.n > max) return res.status(429).json({ error: "Muitas tentativas. Aguarde alguns minutos e tente de novo." });
-    next();
-  };
+/* ---------------- limite de tentativas (no banco, por IP) ----------------
+   No banco para valer entre reinícios/deploys e com mais de uma instância. */
+const MSG_LIMITE = "Muitas tentativas. Aguarde alguns minutos e tente de novo.";
+
+async function excedeuLimite(chave, max) {
+  const t = await prisma.limiteTentativa.findUnique({ where: { chave } });
+  return !!t && t.ate > new Date() && t.n >= max;
 }
+
+async function registrarTentativa(chave, janelaMin) {
+  const agora = new Date();
+  const t = await prisma.limiteTentativa.findUnique({ where: { chave } });
+  if (t && t.ate > agora) {
+    await prisma.limiteTentativa.update({ where: { chave }, data: { n: { increment: 1 } } });
+    return;
+  }
+  const ate = new Date(agora.getTime() + janelaMin * 60e3);
+  await prisma.limiteTentativa.upsert({ where: { chave }, create: { chave, n: 1, ate }, update: { n: 1, ate } });
+}
+
 setInterval(() => {
-  const agora = Date.now();
-  for (const [k, t] of tentativas) if (t.ate < agora) tentativas.delete(k);
+  prisma.limiteTentativa.deleteMany({ where: { ate: { lt: new Date() } } }).catch(() => {});
 }, 10 * 60e3).unref();
 
 /* ---------------- validação ---------------- */
@@ -136,19 +158,28 @@ function validaSenha(senha) {
    ========================================================= */
 export const authApi = Router();
 
-authApi.post("/login", limiteTentativas(10, 15), async (req, res) => {
+// login: só as tentativas que erram a senha contam para o limite
+authApi.post("/login", async (req, res) => {
+  const chave = `login|${req.ip}`;
+  if (await excedeuLimite(chave, 10)) return res.status(429).json({ error: MSG_LIMITE });
   const email = normEmail(req.body?.email);
   const senha = String(req.body?.senha ?? "");
   const usuario = email ? await prisma.usuario.findUnique({ where: { email } }) : null;
   const ok = await confereSenha(senha, usuario?.senhaHash ?? HASH_FALSO);
-  if (!usuario || !ok) return res.status(401).json({ error: "E-mail ou senha incorretos" });
+  if (!usuario || !ok) {
+    await registrarTentativa(chave, 15);
+    return res.status(401).json({ error: "E-mail ou senha incorretos" });
+  }
   if (usuario.status === "pendente") return res.status(403).json({ error: "Seu cadastro ainda aguarda aprovação do administrador." });
   if (usuario.status !== "ativo") return res.status(403).json({ error: "Seu acesso está bloqueado. Fale com o administrador." });
   await iniciarSessao(res, usuario.id);
   res.json({ user: usuarioPublico(usuario) });
 });
 
-authApi.post("/cadastro", limiteTentativas(5, 60), async (req, res) => {
+authApi.post("/cadastro", async (req, res) => {
+  const chave = `cadastro|${req.ip}`;
+  if (await excedeuLimite(chave, 5)) return res.status(429).json({ error: MSG_LIMITE });
+  await registrarTentativa(chave, 60);
   const nome = String(req.body?.nome ?? "").trim().slice(0, 120);
   const email = normEmail(req.body?.email);
   const senha = req.body?.senha;
@@ -184,6 +215,7 @@ authApi.post("/senha", carregarUsuario, exigirLogin, async (req, res) => {
   if (!(await confereSenha(String(req.body?.atual ?? ""), req.user.senhaHash))) throw new ValidationError("Senha atual incorreta");
   validaSenha(req.body?.nova);
   await prisma.usuario.update({ where: { id: req.user.id }, data: { senhaHash: await hashSenha(req.body.nova) } });
+  await encerrarSessoes(req.user.id, req); // desconecta os outros aparelhos
   res.json({ ok: true });
 });
 
@@ -192,12 +224,6 @@ authApi.post("/senha", carregarUsuario, exigirLogin, async (req, res) => {
    ========================================================= */
 export const usuariosApi = Router();
 usuariosApi.use(exigirAdmin);
-
-function idParam(req) {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) throw new ValidationError("id inválido");
-  return id;
-}
 
 const CHAVES_TELAS = new Set(MODULES.map((m) => m.key));
 
@@ -242,7 +268,7 @@ usuariosApi.patch("/:id", async (req, res) => {
     }
   }
   const usuario = await prisma.usuario.update({ where: { id }, data });
-  if (data.status && data.status !== "ativo") await prisma.sessao.deleteMany({ where: { usuarioId: id } });
+  if (data.status && data.status !== "ativo") await encerrarSessoes(id);
   res.json(usuarioPublico(usuario));
 });
 
@@ -250,7 +276,7 @@ usuariosApi.post("/:id/senha", async (req, res) => {
   const id = idParam(req);
   validaSenha(req.body?.senha);
   await prisma.usuario.update({ where: { id }, data: { senhaHash: await hashSenha(req.body.senha) } });
-  if (id !== req.user.id) await prisma.sessao.deleteMany({ where: { usuarioId: id } });
+  await encerrarSessoes(id, id === req.user.id ? req : null);
   res.json({ ok: true });
 });
 
@@ -269,6 +295,7 @@ usuariosApi.put("/telas-restritas", async (req, res) => {
     prisma.telaRestrita.deleteMany(),
     prisma.telaRestrita.createMany({ data: validas.map((chave) => ({ chave })) }),
   ]);
+  cacheRestritas = null;
   res.json({ chaves: validas });
 });
 
