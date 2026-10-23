@@ -166,7 +166,9 @@ const App = {
   },
 
   async openFormModal({ title, fields, onSubmit, initialValues, onDelete }){
-    const form = this.openModal(title);
+    // formulários longos (ex.: Colaboradores) usam duas colunas
+    const grid = fields.length > 8;
+    const form = this.openModal(title, { wide: grid });
     form.innerHTML = loadingHTML("Carregando formulário…");
 
     // carrega as listas das chaves estrangeiras antes de montar o formulário
@@ -179,7 +181,8 @@ const App = {
     }
 
     const init = initialValues || {};
-    form.innerHTML = fields.map(f => this.fieldHTML(f, init[f.key], lookups, init)).join("")
+    const campos = fields.map(f => this.fieldHTML(f, init[f.key], lookups, init)).join("");
+    form.innerHTML = (grid ? `<div class="form-grid">${campos}</div>` : campos)
       + `<p class="form-error" id="formError" hidden></p>`
       + `<div class="modal-actions">`
       + (onDelete ? `<button type="button" class="modal-delete" id="modalDeleteBtn">Excluir</button>` : "")

@@ -165,6 +165,17 @@ Telas calculadas (relatórios, indicadores, dashboards) só aceitam *Ver*. Admin
 
 Chamados abertos são classificados pelo tempo até o prazo: **Atrasado** (venceu), **Crítico** (< 4 h), **Atenção** (< 24 h) e **No prazo**. Ao concluir, o chamado vira "Concluído no prazo" ou "Concluído com atraso". Os limites ficam em `src/lib/format.js` (`SLA_LIMITES`).
 
+## Importando colaboradores de planilha
+
+No Excel, salve a planilha como **CSV UTF-8** e rode:
+
+```bash
+npm run db:importar -- equipe.csv --dominio stf.jus.br --simular   # confere sem gravar
+npm run db:importar -- equipe.csv --dominio stf.jus.br             # grava
+```
+
+Cabeçalhos reconhecidos (com ou sem acento): Nome / Nome completo, Matrícula, Login, E-mail, Setor / Lotação, Função, Ramal, Celular / Tel. Celular, Nascimento / Dt. Nascimento, Formação / Curso, Home Office, Situação da vaga. Quem já existe (mesma matrícula, login ou e-mail) é atualizado; os demais são criados. `--dominio` monta o e-mail como `login@dominio` quando a planilha não tem e-mail. Para gravar no banco do Railway, use a `DATABASE_PUBLIC_URL` do serviço Postgres como `DATABASE_URL`.
+
 ## Migrando os dados da planilha da v1
 
 Os cadastros mudaram de formato (ex.: o nome do colaborador agora é uma referência ao cadastro). O caminho mais seguro é cadastrar primeiro **Colaboradores, Cargos, Clientes e Serviços** pelo painel e depois lançar os demais registros; para volumes grandes, exporte as abas em CSV e importe com `psql \copy` após converter os nomes em ids.

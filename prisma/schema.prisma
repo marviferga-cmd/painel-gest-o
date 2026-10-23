@@ -62,8 +62,17 @@ model Colaborador {
   id              Int      @id @default(autoincrement())
   nome            String
   email           String?  @unique
+  matricula       String?  @unique
+  login           String?  @unique // login de rede
   cargoId         Int?     @map("cargo_id")
   funcao          String?
+  setor           String? // lotação
+  ramal           String?
+  celular         String?
+  nascimento      DateTime? @db.Date
+  formacao        String? // curso / formação acadêmica
+  homeOffice      String?  @map("home_office") // Sim | Não
+  situacaoVaga    String?  @map("situacao_vaga")
   disponibilidade String   @default("Disponível")
   ativo           Boolean  @default(true)
   createdAt       DateTime @default(now()) @map("created_at")

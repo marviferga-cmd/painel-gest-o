@@ -87,9 +87,9 @@ function buildKpiRow(rows, statusCol){
 
 function detectFilterColumns(rows, columns){
   return columns
-    .filter(c => ["status","bool","ref"].includes(c.type))
+    .filter(c => ["status","bool","ref"].includes(c.type) || c.filter)
     .map(col => ({ col, values: [...new Set(rows.map(r => cellText(col, r)))].sort((a,b)=>String(a).localeCompare(String(b))) }))
-    .filter(f => f.values.length > 1 && f.values.length <= 15)
+    .filter(f => f.values.length > 1 && f.values.length <= (f.col.filter ? 40 : 15))
     .slice(0, 4);
 }
 
